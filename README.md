@@ -2,18 +2,25 @@
 
 Stdlib-only Python. No install. 1 unit = 1 meter, Y-up.
 
-## 0. Browser lab (warp UI, same system as the original)
+Model (Parish & Muller 2001 road growth + CityGen blocks + Watabou wards):
+arterial/ring skeleton → **blocks** (quads split by alleys) → **lots** along
+street frontages → one footprint inscribed per lot → perimeter blocks with
+free courtyards. Buildings form blocks, exactly like the original.
+
+## 0. Browser lab (warp UI, original mesh system)
 
 https://ibackstrom.github.io/city-pipeline/ — seed/warp/size inputs, canvas
-preview, warp brushes ported from the original toolset:
+preview, warp brushes on the **shared mesh lattice** (every layer — walls,
+roads, river, blocks, buildings — is evaluated through the mesh nodes,
+exactly like the original warp mode; toggle "show warp mesh" to see it):
 
 | Tool | Key | Does |
 |------|-----|------|
 | Displace | D | pull mesh nodes (default warp brush) |
 | Liquify | L | softer smear |
-| Rotate | R | twist around brush center |
+| Rotate | R | twist the mesh around the brush |
 | Bloat | B | inflate / push cells outward |
-| Relax | X | smooth mesh, fix short edges |
+| Relax | X | smooth the mesh, fix short edges |
 | Equalize | E | snap building angles to 15° |
 | Measure | M | click two points → meters |
 
@@ -39,14 +46,17 @@ river, plots. `0` = clean circle, `1` = heavily twisted. Deterministic per seed.
 Output in `outdir/`:
 - `buildings.csv` — scatter points (main). Columns:
   `id,pos_x,pos_y,pos_z,rot_y_deg,type,width_m,depth_m,height_m,scale,district,seed,warp`
-- `walls.csv, roads.csv, river.csv` — context lines
-- `town.json` — full geometry for the browser lab
-- `preview.svg` — open in browser for quick check
+- `walls.csv, roads.csv (incl. alleys), river.csv` — context lines
+- `blocks.csv` — block outlines (one polygon per block)
+- `mesh.csv` — warp mesh nodes (base + offset); brushes edit offsets
+- `town.json` — base + mesh + final for the browser lab
+- `preview.svg` — blocks, lots implied, buildings, roads
 - `manifest.json` — seed/warp echo + counts
 
-Placement is Watabou-style tight: street-front lots line both sides of every
-road (weighted types, district-biased), then block interiors are infilled —
-exact footprints, 0.8 m alleys, OBB overlap rejection.
+Placement is block-based: lots line each block's street frontages (lot sizes
+derive from the library so every type fits somewhere), one footprint
+inscribed per lot, 0.8 m alleys between buildings, clear courtyards inside
+blocks. Large halls/warehouses get dedicated plots near the plaza.
 
 ## 2. Fit your actual house sizes
 

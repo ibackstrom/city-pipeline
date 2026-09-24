@@ -8,16 +8,19 @@
     "r": 24.0
   },
   "market": {
-    "x": 4.525975374836529,
-    "z": -6.5966314817771465
+    "x": 0.0,
+    "z": 0.0
   },
   "river_w": 9.35378167040049,
+  "mesh_spacing": 18.416666666666668,
   "counts": {
     "castle": 1,
-    "house_A_cottage": 85,
-    "house_B_row": 65,
-    "house_C_merchant": 31,
-    "house_D_hall": 2,
+    "house_A_cottage": 62,
+    "house_B_row": 23,
+    "house_C_merchant": 9,
+    "house_D_hall": 1,
     "market": 1
-  }
+  },
+  "blocks": 33,
+  "lots": 94
 }
