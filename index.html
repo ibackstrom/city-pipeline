@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>city-pipeline — town preview</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#111418;color:#e8e8e8;margin:0;padding:24px}
+main{max-width:900px;margin:0 auto}
+img{background:#1a1d22;border:1px solid #333;border-radius:8px;width:100%;height:auto}
+code,pre{background:#22262d;padding:2px 6px;border-radius:6px}
+pre{padding:12px;overflow:auto}
+a{color:#8ab4ff}
+.meta{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>city-pipeline — small town preview</h1>
+<div class="meta">
+<span>seed <code>1555148727</code></span>
+<span>warp <code>0.35</code></span>
+<span>size <code>17</code></span>
+<span>112 buildings</span>
+</div>
+<img src="out_town/preview.svg" alt="town preview">
+<h2>Files</h2>
+<ul>
+<li><a href="out_town/preview.svg">preview.svg</a> — map above</li>
+<li><a href="out_town/buildings.csv">buildings.csv</a> — Houdini / PCG scatter points</li>
+<li><a href="out_town/manifest.json">manifest.json</a> — seed/warp/counts</li>
+<li><a href="city_gen.py">city_gen.py</a> — generator</li>
+</ul>
+<h2>Regenerate</h2>
+<pre>python3 city_gen.py --seed 1555148727 --warp 0.35 --size 17 --outdir ./out_town</pre>
+<p>CSV columns: <code>id,pos_x,pos_y,pos_z,rot_y_deg,type,width_m,depth_m,height_m,scale,district,seed,warp</code></p>
+</main>
+</body>
+</html>
