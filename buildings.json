@@ -10,6 +10,5 @@
     {"name": "castle",            "w": 25.0, "d": 30.0, "weight": 0,  "h": 14.0, "color": "#7a7f8a", "count": 1}
   ],
   "gap_m": 0.8,
-  "road_clearance_m": 1.0,
-  "instances_per_type": 5
+  "road_clearance_m": 1.0
 }

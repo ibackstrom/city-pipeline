@@ -2,9 +2,10 @@
 
 Stdlib-only Python. No install. 1 unit = 1 meter, Y-up.
 
-Small town, original-style: size 10 (~65 m radius), citadel + walls + river,
-**exactly 5 instances of each of the 5 common building types** + market +
-castle = 27 scatter points (`instances_per_type` in `buildings.json`).
+Small town, original-style: size 17 (~110 m radius, as the original link),
+citadel + walls + river, **5 common building types + market + castle** —
+every lot is filled with one of the 5 footprints (weighted, district-biased),
+~100 typed scatter points per town.
 
 Model (Parish & Muller 2001 road growth + CityGen blocks + Watabou wards):
 arterial/ring skeleton → **blocks** (quads split by alleys) → **lots** via the
@@ -19,8 +20,7 @@ dark thick with towers, single ink style for all buildings.
 ## 0. Browser lab (original look, warp UX, small town only)
 
 https://ibackstrom.github.io/city-pipeline/ — fullscreen parchment map,
-locked **Small Town · 10** preset, only seed + warp inputs, exactly 5
-instances per common type. Right-click opens
+locked **Small Town · 17** preset, only seed + warp inputs. Right-click opens
 the menu (New town / Warp mode / Export CSV / Export JSON), like the
 original; warp mode shows the tool panel + mesh lattice and the brush ring.
 `Enter` = new town / apply warp, `Esc` = discard warp, `W` toggles warp mode.
@@ -39,13 +39,15 @@ Wheel or `+`/`-` = brush size.
 `Export CSV` downloads `buildings.csv` with the same columns as the Python
 output (warped state included) — straight into Houdini/PCG.
 
-Limited geometry by design: small-town radius only (~65 m), coarse warp
-lattice (~R/5 spacing), 27 buildings, plain canvas fills — no heavy layers.
+Limited geometry by design: small-town radius only (~110 m), coarse warp
+lattice (~R/6 spacing), ~100 buildings, plain canvas fills — no heavy layers.
+Rendering matches the original: alleys are never drawn (they exist only as
+gaps between buildings), roads are thin casings, buildings one ink style.
 
 ## 1. Generate (your Watabou preset)
 
 ```bash
-# small town (default: size 10, 5 instances per common type)
+# small town from the original link (size 17, seed + warp)
 python3 city_gen.py --seed 1555148727 --warp 0.35 --outdir ./out_town
 
 # variations
@@ -68,10 +70,10 @@ Output in `outdir/`:
 
 Placement is block-based: each block is inset from its streets and cut into
 lots by the original alley recursion; one exact footprint is inscribed per
-lot (0.8 m gaps, OBB overlap rejection) until every common type reaches its
-instance count — any shortfall falls back to street-front or free-standing
-plots. `manifest.json` reports per-type counts (verified exact
-5/5/5/5/5 + castle + market across 28 seeds, Python and browser alike).
+lot (0.8 m gaps, OBB overlap rejection, road-aligned rotation). A post-warp
+overlap cull drops the smaller building of any pair the mesh distortion
+intersects (market/castle are never dropped), so the exported CSV is always
+collision-free for scattering.
 
 ## 2. Fit your actual house sizes
 
