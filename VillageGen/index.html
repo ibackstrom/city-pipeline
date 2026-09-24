@@ -1,0 +1,1152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VillageGen — Medieval Fantasy City Generator</title>
+<style>
+/* original DEFAULT palette */
+:root{--paper:#ccc5b8;--light:#99948a;--medium:#67635c;--dark:#1a1917}
+*{box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;background:var(--paper);color:var(--dark);margin:0;overflow:hidden}
+#top{position:fixed;top:10px;left:10px;z-index:5;font-size:13px;background:rgba(204,197,184,.92);border:1px solid var(--medium);padding:8px 10px;max-width:280px}
+#top .row{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+#top input[type=range]{width:120px}
+#top button{font-family:inherit;font-size:14px;background:var(--paper);color:var(--dark);border:1px solid var(--medium);padding:4px 12px;cursor:pointer}
+#top button:hover{background:var(--dark);color:var(--paper)}
+#warpbar{position:fixed;top:10px;right:10px;z-index:6;display:none;flex-direction:column;gap:1px;background:rgba(204,197,184,.95);border:1px solid var(--medium);padding:6px}
+#warpbar button{font-family:inherit;font-size:12px;background:var(--paper);color:var(--dark);border:1px solid var(--medium);padding:4px 10px;cursor:pointer;text-align:left}
+#warpbar button.on{background:var(--dark);color:var(--paper)}
+#warpbar button kbd{float:right;margin-left:12px;opacity:.6}
+#stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+canvas{background:var(--paper);cursor:crosshair;touch-action:none;max-width:100%;max-height:100vh}
+#hint{position:fixed;left:10px;bottom:8px;z-index:5;font-size:12px;font-style:italic;opacity:.75}
+#credit{position:fixed;right:10px;bottom:8px;z-index:5;font-size:11px;opacity:.65}
+#credit a{color:inherit}
+#menu{position:fixed;left:10px;bottom:28px;z-index:6;display:none;flex-direction:column;background:rgba(204,197,184,.97);border:1px solid var(--dark);min-width:220px}
+#menu button{font-family:inherit;font-size:13px;background:none;border:none;color:var(--dark);padding:7px 12px;cursor:pointer;text-align:left}
+#menu button:hover{background:var(--dark);color:var(--paper)}
+</style>
+</head>
+<body>
+<div id="top">
+<div class="row"><button id="regen" title="Enter">new city</button>
+<span id="counts" style="font-size:12px;font-style:italic"></span></div>
+<div class="row"><b>size</b><input id="size" type="range" min="6" max="40" step="1" value="25"><span id="sizeval">25</span></div>
+<div class="row"><b>warp</b><input id="warp" type="range" min="0" max="1" step="0.01" value="0"><span id="warpval">0.00</span></div>
+</div>
+<div id="warpbar"><div id="tools"></div>
+<div style="font-size:12px;padding:2px 10px">brush <input id="brush" type="range" min="10" max="260" value="90" style="width:90px"> <span id="brushval">90</span></div>
+</div>
+<div id="stage"><canvas id="cv" width="900" height="900"></canvas></div>
+<div id="err" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99;display:none;max-width:80%;background:#fff;color:#a00;border:2px solid #a00;padding:14px 18px;font:13px monospace;white-space:pre-wrap"></div>
+<script>
+window.addEventListener('error',function(e){
+ var d=document.getElementById('err');
+ d.style.display='block';
+ d.textContent='Error: '+(e.message||e.error)+'\n\nHard-refresh first (Cmd/Ctrl+Shift+R) — if this persists, send me this message.';
+});
+</script>
+<div id="hint">right-click: menu · Enter: new city · hover a building</div>
+<div id="credit">Based on <a href="https://watabou.github.io/city-generator/" target="_blank" rel="noopener">watabou’s generator</a></div>
+<div id="menu"></div>
+<script>
+'use strict';
+/* ============================================================
+   Faithful JS port of Oleg Dolya's Medieval Fantasy City
+   Generator (watabou/TownGeneratorOS, GPL-3.0). Translated from
+   the Haxe sources: Random, Polygon, Voronoi, Graph, Cutter,
+   Topology, CurtainWall, Model and all wards.
+   ============================================================ */
+
+// ---- Random (LCG, as the original) ----
+const Random={g:48271.0,n:2147483647,seed:1,
+ reset(s=-1){Random.seed=s!==-1?s:Math.floor(Math.random()*Random.n)%Random.n},
+ next(){Random.seed=Math.floor((Random.seed*Random.g)%Random.n);return Random.seed},
+ float(){return Random.next()/Random.n},
+ normal(){return(Random.float()+Random.float()+Random.float())/3},
+ int(a,b){return Math.floor(a+Random.next()/Random.n*(b-a))},
+ bool(chance=0.5){return Random.float()<chance},
+ fuzzy(f=1.0){return f===0?0.5:(1-f)/2+f*Random.normal()}};
+const sgn=v=>v===0?0:(v<0?-1:1);
+
+// ---- Point (mutable, identity-based) ----
+class Pt{constructor(x=0,y=0){this.x=x;this.y=y}
+ set(p){this.x=p.x;this.y=p.y}
+ add(p){return new Pt(this.x+p.x,this.y+p.y)}
+ addEq(p){this.x+=p.x;this.y+=p.y;return this}
+ subtract(p){return new Pt(this.x-p.x,this.y-p.y)}
+ scale(k){return new Pt(this.x*k,this.y*k)}
+ scaleEq(k){this.x*=k;this.y*=k;return this}
+ length(){return Math.hypot(this.x,this.y)}
+ norm(k=1){const l=this.length()||1;return new Pt(this.x/l*k,this.y/l*k)}
+ rotate90(){return new Pt(-this.y,this.x)}
+ dot(p){return this.x*p.x+this.y*p.y}
+ offset(dx,dy){this.x+=dx;this.y+=dy}}
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+
+// ---- GeomUtils ----
+function intersectLines(x1,y1,dx1,dy1,x2,y2,dx2,dy2){
+ const d=dx1*dy2-dy1*dx2;if(d===0)return null;
+ const t2=(dy1*(x2-x1)-dx1*(y2-y1))/d;
+ const t1=dx1!==0?(x2-x1+dx2*t2)/dx1:(y2-y1+dy2*t2)/dy1;
+ return new Pt(t1,t2)}
+const interpolate=(p1,p2,ratio=0.5)=>{const d=p2.subtract(p1);
+ return new Pt(p1.x+d.x*ratio,p1.y+d.y*ratio)};
+const cross=(x1,y1,x2,y2)=>x1*y2-y1*x2;
+const sscalar=(x1,y1,x2,y2)=>x1*x2+y1*y2;
+function distance2line(x1,y1,dx1,dy1,x0,y0){
+ return(dx1*y0-dy1*x0+(y1+dy1)*x1-(x1+dx1)*y1)/Math.sqrt(dx1*dx1+dy1*dy1)}
+
+// ---- Polygon helpers (poly = Array<Pt>, identity indexOf) ----
+const DELTA=0.000001;
+const inPoly=(poly,v)=>poly.indexOf(v)!==-1;
+const pSquare=poly=>{let v1=poly[poly.length-1],v2=poly[0];
+ let s=v1.x*v2.y-v2.x*v1.y;
+ for(let i=1;i<poly.length;i++){v1=v2;v2=poly[i];s+=v1.x*v2.y-v2.x*v1.y}return s*0.5};
+const pPerimeter=poly=>{let len=0;for(let i=0;i<poly.length;i++)
+ len+=dist(poly[i],poly[(i+1)%poly.length]);return len};
+const pCompactness=poly=>{const p=pPerimeter(poly);
+ return p?4*Math.PI*pSquare(poly)/(p*p):0};
+const pCenter=poly=>{const c=new Pt();for(const v of poly)c.addEq(v);
+ c.scaleEq(1/poly.length);return c};
+const pCentroid=poly=>{let x=0,y=0,a=0;
+ for(let i=0;i<poly.length;i++){const v0=poly[i],v1=poly[(i+1)%poly.length];
+  const f=cross(v0.x,v0.y,v1.x,v1.y);a+=f;x+=(v0.x+v1.x)*f;y+=(v0.y+v1.y)*f}
+ const s6=a?1/(3*a):0;return new Pt(s6*x,s6*y)};
+const pDistance=(poly,p)=>Math.min(...poly.map(v=>dist(v,p)));
+const pNext=(poly,v)=>poly[(poly.indexOf(v)+1)%poly.length];
+const pPrev=(poly,v)=>poly[(poly.indexOf(v)+poly.length-1)%poly.length];
+const pFindEdge=(poly,a,b)=>{const i=poly.indexOf(a);
+ return i!==-1&&poly[(i+1)%poly.length]===b?i:-1};
+const pVector=(poly,v)=>pNext(poly,v).subtract(v);
+const pVectori=(poly,i)=>poly[i===poly.length-1?0:i+1].subtract(poly[i]);
+function pIsConvexVertexi(poly,i){const n=poly.length;
+ const v0=poly[(i+n-1)%n],v1=poly[i],v2=poly[(i+1)%n];
+ return cross(v1.x-v0.x,v1.y-v0.y,v2.x-v1.x,v2.y-v1.y)>0}
+const pIsConvex=poly=>poly.every((_,i)=>pIsConvexVertexi(poly,i));
+function pSmoothVertex(poly,v,f=1){const prev=pPrev(poly,v),next=pNext(poly,v);
+ return new Pt(prev.x+v.x*f+next.x,prev.y+v.y*f+next.y).scale(1/(2+f))}
+function pSmoothVertexEq(poly,f=1){const n=poly.length;let v1=poly[n-1],v2=poly[0];
+ const out=[];for(let i=0;i<n;i++){const v0=v1;v1=v2;v2=poly[(i+1)%n];
+  out.push(new Pt((v0.x+v1.x*f+v2.x)/(2+f),(v0.y+v1.y*f+v2.y)/(2+f)))}return out}
+function pFilterShort(poly,thr){let i=1;const v0=poly[0],result=[v0];
+ while(i<poly.length){let v1=poly[i++];
+  while(dist(v0,v1)<thr&&i<poly.length)v1=poly[i++];
+  result.push(v0=v1)}return result}
+function pInset(poly,p1,d){
+ const i1=poly.indexOf(p1);
+ const i0=i1>0?i1-1:poly.length-1,p0=poly[i0];
+ const i2=i1<poly.length-1?i1+1:0,p2=poly[i2];
+ const i3=i2<poly.length-1?i2+1:0,p3=poly[i3];
+ const v0=p1.subtract(p0),v1=p2.subtract(p1),v2=p3.subtract(p2);
+ let cos=v0.dot(v1)/v0.length()/v1.length();
+ let z=v0.x*v1.y-v0.y*v1.x;
+ let t=d/Math.sqrt(1-cos*cos);
+ if(z>0)t=Math.min(t,v0.length()*0.99);else t=Math.min(t,v1.length()*0.5);
+ t*=sgn(z);poly[i1]=p1.subtract(v0.norm(t));
+ cos=v1.dot(v2)/v1.length()/v2.length();
+ z=v1.x*v2.y-v1.y*v2.x;
+ t=d/Math.sqrt(1-cos*cos);
+ if(z>0)t=Math.min(t,v2.length()*0.99);else t=Math.min(t,v1.length()*0.5);
+ poly[i2]=p2.add(v2.norm(t))}
+function pInsetEq(poly,d){const q=poly.slice();
+ for(let i=0;i<q.length;i++)if(d!==0)pInset(q,q[i],d);return q}
+function pInsetAll(poly,ds){const q=poly.slice();
+ for(let i=0;i<q.length;i++)if(ds[i]!==0)pInset(q,q[i],ds[i]);return q}
+function pBuffer(poly,ds){
+ const q=[];let i=0;const n=poly.length;
+ for(let k=0;k<n;k++){const v0=poly[k],v1=poly[(k+1)%n];const dd=ds[i++];
+  if(dd===0){q.push(v0);q.push(v1)}
+  else{const v=v1.subtract(v0),nv=v.rotate90().norm(dd);q.push(v0.add(nv));q.push(v1.add(nv))}}
+ // resolve self-intersections
+ let wasCut=true,lastEdge=0;
+ while(wasCut){wasCut=false;const n2=q.length;
+  loop1:for(let i=lastEdge;i<n2-2;i++){lastEdge=i;
+   const p11=q[i],p12=q[i+1],x1=p11.x,y1=p11.y,dx1=p12.x-x1,dy1=p12.y-y1;
+   const jmax=i>0?n2:n2-1;
+   for(let j=i+2;j<jmax;j++){const p21=q[j],p22=j<n2-1?q[j+1]:q[0];
+    const x2=p21.x,y2=p21.y,dx2=p22.x-x2,dy2=p22.y-y2;
+    const t=intersectLines(x1,y1,dx1,dy1,x2,y2,dx2,dy2);
+    if(t&&t.x>DELTA&&t.x<1-DELTA&&t.y>DELTA&&t.y<1-DELTA){
+     const pn=new Pt(x1+dx1*t.x,y1+dy1*t.x);
+     q.splice(j+1,0,pn);q.splice(i+1,0,pn);wasCut=true;break loop1}}}}
+ // pick the biggest part
+ const regular=q.map((_,i)=>i);
+ let bestPart=null,bestPartSq=-Infinity;
+ while(regular.length>0){const indices=[];const start=regular[0];let i=start;
+  do{indices.push(i);const ri=regular.indexOf(i);if(ri!==-1)regular.splice(ri,1);
+   const next=(i+1)%q.length,v=q[next];
+   let next1=q.indexOf(v);
+   if(next1===next)next1=q.lastIndexOf(v);
+   i=next1===-1?next:next1}while(i!==start);
+  const part=indices.map(k=>q[k]);const s=pSquare(part);
+  if(s>bestPartSq){bestPart=part;bestPartSq=s}}
+ return bestPart!==null?bestPart:poly.slice()}
+const pBufferEq=(poly,d)=>pBuffer(poly,poly.map(()=>d));
+function pShrink(poly,ds){let q=poly.slice();const n=poly.length;
+ for(let i=0;i<n;i++){const dd=ds[i];
+  if(dd>0){const v1=poly[i],v2=poly[(i+1)%n],v=v2.subtract(v1),nv=v.rotate90().norm(dd);
+   q=pCut(q,v1.add(nv),v2.add(nv),0)[0]}}return q}
+const pShrinkEq=(poly,d)=>pShrink(poly,poly.map(()=>d));
+function pPeel(poly,v1,d){const i1=poly.indexOf(v1);
+ const i2=i1===poly.length-1?0:i1+1,v2=poly[i2];
+ const v=v2.subtract(v1),n=v.rotate90().norm(d);
+ return pCut(poly,v1.add(n),v2.add(n),0)[0]}
+function pSimplyfy(poly,n){poly=poly.slice();
+ while(poly.length>n){const len=poly.length;let result=0,mn=Infinity;
+  let b=poly[len-1],c=poly[0];
+  for(let i=0;i<len;i++){const a=b;b=c;c=poly[(i+1)%len];
+   const m=Math.abs(a.x*(b.y-c.y)+b.x*(c.y-a.y)+c.x*(a.y-b.y));
+   if(m<mn){result=i;mn=m}}
+  poly.splice(result,1)}return poly}
+function pBorders(poly,another){const len1=poly.length,len2=another.length;
+ for(let i=0;i<len1;i++){const j=another.indexOf(poly[i]);
+  if(j!==-1){const next=poly[(i+1)%len1];
+   if(next===another[(j+1)%len2]||next===another[(j+len2-1)%len2])return true}}
+ return false}
+function pSpliti(poly,i1,i2){if(i1>i2){const t=i1;i1=i2;i2=t}
+ return[poly.slice(i1,i2+1),poly.slice(i2).concat(poly.slice(0,i1+1))]}
+const pSplit=(poly,p1,p2)=>pSpliti(poly,poly.indexOf(p1),poly.indexOf(p2));
+function pCut(poly,p1,p2,gap=0){
+ const x1=p1.x,y1=p1.y,dx1=p2.x-x1,dy1=p2.y-y1;
+ const len=poly.length;let edge1=0,ratio1=0,edge2=0,ratio2=0,count=0;
+ for(let i=0;i<len;i++){const v0=poly[i],v1=poly[(i+1)%len];
+  const x2=v0.x,y2=v0.y,dx2=v1.x-x2,dy2=v1.y-y2;
+  const t=intersectLines(x1,y1,dx1,dy1,x2,y2,dx2,dy2);
+  if(t&&t.y>=0&&t.y<=1){if(count===0){edge1=i;ratio1=t.x}
+   else if(count===1){edge2=i;ratio2=t.x}count++}}
+ if(count===2){const point1=p1.add(p2.subtract(p1).scale(ratio1));
+  const point2=p1.add(p2.subtract(p1).scale(ratio2));
+  let half1=poly.slice(edge1+1,edge2+1);
+  half1.unshift(point1);half1.push(point2);
+  let half2=poly.slice(edge2+1).concat(poly.slice(0,edge1+1));
+  half2.unshift(point2);half2.push(point1);
+  if(gap>0){half1=pPeel(half1,point2,gap/2);half2=pPeel(half2,point1,gap/2)}
+  const v=pVectori(poly,edge1);
+  return cross(dx1,dy1,v.x,v.y)>0?[half1,half2]:[half2,half1]}
+ return[poly.slice()]}
+function pInterpolate(poly,p){let sum=0;const dd=[];
+ for(const v of poly){const d=1/Math.max(dist(v,p),1e-9);dd.push(d);sum+=d}
+ return dd.map(d=>d/sum)}
+const pRect=(w=1,h=1)=>[new Pt(-w/2,-h/2),new Pt(w/2,-h/2),new Pt(w/2,h/2),new Pt(-w/2,h/2)];
+const pRegular=(n=8,r=1)=>Array.from({length:n},(_,i)=>
+ new Pt(r*Math.cos(i/n*Math.PI*2),r*Math.sin(i/n*Math.PI*2)));
+
+// ---- Voronoi ----
+class Triangle{constructor(p1,p2,p3){
+ const s=(p2.x-p1.x)*(p2.y+p1.y)+(p3.x-p2.x)*(p3.y+p2.y)+(p1.x-p3.x)*(p1.y+p3.y);
+ this.p1=p1;this.p2=s>0?p2:p3;this.p3=s>0?p3:p2;
+ const x1=(p1.x+p2.x)/2,y1=(p1.y+p2.y)/2,x2=(p2.x+p3.x)/2,y2=(p2.y+p3.y)/2;
+ const dx1=p1.y-p2.y,dy1=p2.x-p1.x,dx2=p2.y-p3.y,dy2=p3.x-p2.x;
+ const tg1=dx1!==0?dy1/dx1:Infinity;
+ const den=dy2-dx2*tg1;
+ const t2=den!==0?((y1-y2)-(x1-x2)*tg1)/den:0;
+ this.c=new Pt(x2+dx2*t2,y2+dy2*t2);this.r=dist(this.c,p1)}
+ hasEdge(a,b){return(this.p1===a&&this.p2===b)||
+  (this.p2===a&&this.p3===b)||(this.p3===a&&this.p1===b)}}
+class Region{constructor(seed){this.seed=seed;this.vertices=[]}
+ sortVertices(){this.vertices.sort((v1,v2)=>{
+  const x1=v1.c.x-this.seed.x,y1=v1.c.y-this.seed.y;
+  const x2=v2.c.x-this.seed.x,y2=v2.c.y-this.seed.y;
+  if(x1>=0&&x2<0)return 1;if(x2>=0&&x1<0)return -1;
+  if(x1===0&&x2===0)return y2>y1?1:-1;
+  return sgn(x2*y1-x1*y2)});return this}
+ center(){const c=new Pt();for(const v of this.vertices)c.addEq(v.c);
+  c.scaleEq(1/this.vertices.length);return c}}
+class Voronoi{
+ constructor(minx,miny,maxx,maxy){this.triangles=[];
+  const c1=new Pt(minx,miny),c2=new Pt(minx,maxy),c3=new Pt(maxx,miny),c4=new Pt(maxx,maxy);
+  this.frame=[c1,c2,c3,c4];this.points=[c1,c2,c3,c4];
+  this.triangles.push(new Triangle(c1,c2,c3),new Triangle(c2,c3,c4));
+  this._regions=new Map();this._regionsDirty=false;
+  for(const p of this.points)this._regions.set(p,this._buildRegion(p))}
+ _buildRegion(p){const r=new Region(p);
+  for(const tr of this.triangles)
+   if(tr.p1===p||tr.p2===p||tr.p3===p)r.vertices.push(tr);
+  return r.sortVertices()}
+ addPoint(p){const toSplit=this.triangles.filter(tr=>dist(p,tr.c)<tr.r);
+  if(toSplit.length>0){this.points.push(p);
+   const a=[],b=[];
+   for(const t1 of toSplit){let e1=true,e2=true,e3=true;
+    for(const t2 of toSplit){if(t2===t1)continue;
+     if(e1&&t2.hasEdge(t1.p2,t1.p1))e1=false;
+     if(e2&&t2.hasEdge(t1.p3,t1.p2))e2=false;
+     if(e3&&t2.hasEdge(t1.p1,t1.p3))e3=false;
+     if(!(e1||e2||e3))break}
+    if(e1){a.push(t1.p1);b.push(t1.p2)}
+    if(e2){a.push(t1.p2);b.push(t1.p3)}
+    if(e3){a.push(t1.p3);b.push(t1.p1)}}
+   let index=0;
+   do{this.triangles.push(new Triangle(p,a[index],b[index]));
+    index=a.indexOf(b[index])}while(index!==0);
+   for(const tr of toSplit){const i=this.triangles.indexOf(tr);this.triangles.splice(i,1)}
+   this._regionsDirty=true}}
+ regionsMap(){if(this._regionsDirty){this._regions=new Map();this._regionsDirty=false;
+  for(const p of this.points)this._regions.set(p,this._buildRegion(p))}
+  return this._regions}
+ _isReal(tr){return!(this.frame.includes(tr.p1)||this.frame.includes(tr.p2)||this.frame.includes(tr.p3))}
+ partioning(){const result=[];
+  for(const p of this.points){const r=this.regionsMap().get(p)||this._buildRegion(p);
+   let isReal=true;
+   for(const v of r.vertices)if(!this._isReal(v)){isReal=false;break}
+   if(isReal)result.push(r)}
+  return result}
+ static relax(voronoi,toRelax=null){const regions=voronoi.partioning();
+  let points=voronoi.points.filter(p=>!voronoi.frame.includes(p));
+  if(toRelax===null)toRelax=voronoi.points;
+  for(const r of regions)if(toRelax.includes(r.seed)){
+   points=points.filter(p=>p!==r.seed);points.push(r.center())}
+  return Voronoi.build(points)}
+ static build(vertices){let minx=1e10,miny=1e10,maxx=-1e9,maxy=-1e9;
+  for(const v of vertices){minx=Math.min(minx,v.x);miny=Math.min(miny,v.y);
+   maxx=Math.max(maxx,v.x);maxy=Math.max(maxy,v.y)}
+  const dx=(maxx-minx)*0.5,dy=(maxy-miny)*0.5;
+  const vor=new Voronoi(minx-dx/2,miny-dy/2,maxx+dx/2,maxy+dy/2);
+  for(const v of vertices)vor.addPoint(v);
+  return vor}}
+
+// ---- Graph ----
+class Node{constructor(){this.links=new Map()}
+ link(node,price=1,sym=true){this.links.set(node,price);
+  if(sym)node.links.set(this,price)}}
+class Graph{constructor(){this.nodes=[]}
+ add(){const n=new Node();this.nodes.push(n);return n}
+ aStar(start,goal,exclude=null){const closed=exclude?exclude.slice():[];
+  const open=[start];const cameFrom=new Map();const g=new Map();g.set(start,0);
+  while(open.length>0){const current=open.shift();
+   if(current===goal)return this._buildPath(cameFrom,current);
+   closed.push(current);const curScore=g.get(current);
+   for(const[neighbour,price]of current.links){
+    if(closed.includes(neighbour))continue;
+    const score=curScore+price;
+    if(!open.includes(neighbour))open.push(neighbour);
+    else if(score>=g.get(neighbour))continue;
+    cameFrom.set(neighbour,current);g.set(neighbour,score)}}
+  return null}
+ _buildPath(cameFrom,current){const path=[current];
+  while(cameFrom.has(current)){current=cameFrom.get(current);path.push(current)}
+  return path}}
+
+// ---- Cutter ----
+const Cutter={
+ bisect(poly,vertex,ratio=0.5,angle=0,gap=0){
+  const next=pNext(poly,vertex);
+  const p1=interpolate(vertex,next,ratio);
+  const d=next.subtract(vertex);
+  const cosB=Math.cos(angle),sinB=Math.sin(angle);
+  const vx=d.x*cosB-d.y*sinB,vy=d.y*cosB+d.x*sinB;
+  const p2=new Pt(p1.x-vy,p1.y+vx);
+  return pCut(poly,p1,p2,gap)},
+ radial(poly,center=null,gap=0){if(center===null)center=pCentroid(poly);
+  const sectors=[];const n=poly.length;
+  for(let i=0;i<n;i++){const v0=poly[i],v1=poly[(i+1)%n];
+   let sector=[center,v0,v1];
+   if(gap>0)sector=pShrink(sector,[gap/2,0,gap/2]);
+   sectors.push(sector)}return sectors},
+ semiRadial(poly,center=null,gap=0){if(center===null){
+   const centroid=pCentroid(poly);
+   center=poly.reduce((m,v)=>dist(v,centroid)<dist(m,centroid)?v:m)}
+  gap/=2;const sectors=[];const n=poly.length;
+  for(let i=0;i<n;i++){const v0=poly[i],v1=poly[(i+1)%n];
+   if(v0!==center&&v1!==center){let sector=[center,v0,v1];
+    if(gap>0){const d=[pFindEdge(poly,center,v0)===-1?gap:0,0,
+     pFindEdge(poly,v1,center)===-1?gap:0];sector=pShrink(sector,d)}
+    sectors.push(sector)}}return sectors},
+ ring(poly,thickness){const slices=[];const n=poly.length;
+  for(let i=0;i<n;i++){const v1=poly[i],v2=poly[(i+1)%n];
+   const v=v2.subtract(v1),nv=v.rotate90().norm(thickness);
+   slices.push({p1:v1.add(nv),p2:v2.add(nv),len:v.length()})}
+  slices.sort((a,b)=>a.len-b.len);
+  const peel=[];let p=poly.slice();
+  for(let i=0;i<slices.length;i++){const halves=pCut(p,slices[i].p1,slices[i].p2);
+   p=halves[0];if(halves.length===2)peel.push(halves[1])}
+  return peel}};
+
+// ---- constants / wards ----
+const MAIN_STREET=2.0,REGULAR_STREET=1.0,ALLEY=0.6;
+class GenError extends Error{}
+
+class Patch{constructor(vertices){this.shape=vertices.slice();
+  this.ward=null;this.withinCity=false;this.withinWalls=false}
+ static fromRegion(r){return new Patch(r.vertices.map(tr=>tr.c))}}
+
+class Ward{constructor(model,patch){this.model=model;this.patch=patch;this.geometry=[]}
+ createGeometry(){this.geometry=[]}
+ getLabel(){return null}
+ getCityBlock(){const insetDist=[];
+  const innerPatch=this.model.wall===null||this.patch.withinWalls;
+  const n=this.patch.shape.length;
+  for(let i=0;i<n;i++){const v0=this.patch.shape[i],v1=this.patch.shape[(i+1)%n];
+   if(this.model.wall!==null&&this.model.wall.bordersBy(this.patch,v0,v1))
+    insetDist.push(MAIN_STREET/2);
+   else{let onStreet=innerPatch&&this.model.plaza!==null&&
+     pFindEdge(this.model.plaza.shape,v1,v0)!==-1;
+    if(!onStreet)for(const street of this.model.arteries)
+     if(inPoly(street,v0)&&inPoly(street,v1)){onStreet=true;break}
+    insetDist.push((onStreet?MAIN_STREET:(innerPatch?REGULAR_STREET:ALLEY))/2)}}
+  return pIsConvex(this.patch.shape)?
+   pShrink(this.patch.shape,insetDist):pBuffer(this.patch.shape,insetDist)}
+ filterOutskirts(){const populatedEdges=[];
+  const patch=this.patch,model=this.model;
+  const addEdge=(v1,v2)=>{const dx=v2.x-v1.x,dy=v2.y-v1.y;const distances=new Map();
+   let bestD=-Infinity,bestV=null;
+   for(const v of patch.shape){let d;
+    if(v===v1||v===v2)d=0;
+    else d=distance2line(v1.x,v1.y,dx,dy,v.x,v.y);
+    distances.set(v,d);if(d>bestD){bestD=d;bestV=v}}
+   populatedEdges.push({x:v1.x,y:v1.y,dx,dy,d:bestD})};
+  const n=patch.shape.length;
+  for(let i=0;i<n;i++){const v1=patch.shape[i],v2=patch.shape[(i+1)%n];
+   let onRoad=false;
+   for(const street of model.arteries)
+    if(inPoly(street,v1)&&inPoly(street,v2)){onRoad=true;break}
+   if(onRoad)addEdge(v1,v2);
+   else{const nb=model.getNeighbour(patch,v1);
+    if(nb!==null&&nb.withinCity)addEdge(v1,v2)}}
+  const density=[];
+  for(const v of patch.shape){
+   if(model.gates.includes(v))density.push(1);
+   else if(model.patchByVertex(v).every(p=>p.withinCity))density.push(2*Random.float());
+   else density.push(0)}
+  this.geometry=this.geometry.filter(building=>{
+   let minDist=1;
+   for(const e of populatedEdges)for(const v of building){
+    const d=distance2line(e.x,e.y,e.dx,e.dy,v.x,v.y)/e.d;
+    if(d<minDist)minDist=d}
+   const c=pCenter(building);
+   const interp=pInterpolate(patch.shape,c);
+   let p=0;for(let j=0;j<interp.length;j++)p+=density[j]*interp[j];
+   minDist/=p||1;
+   return Random.fuzzy(1)>minDist})}
+ static createAlleys(p,minSq,gridChaos,sizeChaos,emptyProb=0.04,split=true){
+  let v=null,length=-1;const n=p.length;
+  for(let i=0;i<n;i++){const l=dist(p[i],p[(i+1)%n]);
+   if(l>length){length=l;v=p[i]}}
+  const spread=0.8*gridChaos;
+  const ratio=(1-spread)/2+Random.float()*spread;
+  const angleSpread=Math.PI/6*gridChaos*(pSquare(p)<minSq*4?0:1);
+  const b=(Random.float()-0.5)*angleSpread;
+  const halves=Cutter.bisect(p,v,ratio,b,split?ALLEY:0);
+  const buildings=[];
+  for(const half of halves){
+   if(pSquare(half)<minSq*Math.pow(2,4*sizeChaos*(Random.float()-0.5))){
+    if(!Random.bool(emptyProb))buildings.push(half)}
+   else buildings.push(...Ward.createAlleys(half,minSq,gridChaos,sizeChaos,emptyProb,
+    pSquare(half)>minSq/(Random.float()*Random.float())))}
+  return buildings}
+ static createOrthoBuilding(poly,minBlockSq,fill){
+  const findLongestEdge=p=>{let best=0,bl=-1;
+   for(let i=0;i<p.length;i++){const l=pVector(p,p[i]).length();
+    if(l>bl){bl=l;best=i}}return best};
+  const slice_poly=(p,c1,c2)=>{
+   const v0i=findLongestEdge(p);const v0=p[v0i];
+   const v1=v0i<p.length-1?p[v0i+1]:p[0];
+   const v=v1.subtract(v0);
+   const ratio=0.4+Random.float()*0.2;
+   const p1=interpolate(v0,v1,ratio);
+   const c=Math.abs(sscalar(v.x,v.y,c1.x,c1.y))<Math.abs(sscalar(v.x,v.y,c2.x,c2.y))?c1:c2;
+   const halves=pCut(p,p1,p1.add(c));
+   const buildings=[];
+   for(const half of halves){
+    if(pSquare(half)<minBlockSq*Math.pow(2,Random.normal()*2-1)){
+     if(Random.bool(fill))buildings.push(half)}
+    else buildings.push(...slice_poly(half,c1,c2))}
+   return buildings};
+  if(pSquare(poly)<minBlockSq)return[poly.slice()];
+  const c1=pVector(poly,poly[findLongestEdge(poly)]);
+  const c2=c1.rotate90();
+  while(true){const blocks=slice_poly(poly,c1,c2);
+   if(blocks.length>0)return blocks}}}
+
+class CommonWard extends Ward{constructor(model,patch,minSq,gridChaos,sizeChaos,emptyProb=0.04){
+  super(model,patch);this.minSq=minSq;this.gridChaos=gridChaos;
+  this.sizeChaos=sizeChaos;this.emptyProb=emptyProb}
+ createGeometry(){const block=this.getCityBlock();
+  this.geometry=Ward.createAlleys(block,this.minSq,this.gridChaos,this.sizeChaos,this.emptyProb);
+  if(!this.model.isEnclosed(this.patch))this.filterOutskirts()}}
+class CraftsmenWard extends CommonWard{constructor(model,patch){
+  super(model,patch,10+80*Random.float()*Random.float(),0.5+Random.float()*0.2,0.6)}
+ getLabel(){return'Craftsmen'}}
+class MerchantWard extends CommonWard{constructor(model,patch){
+  super(model,patch,50+60*Random.float()*Random.float(),0.5+Random.float()*0.3,0.7,0.15)}
+ static rateLocation(model,patch){
+  return pDistance(patch.shape,model.plaza?pCenter(model.plaza.shape):model.center)}
+ getLabel(){return'Merchant'}}
+class PatriciateWard extends CommonWard{constructor(model,patch){
+  super(model,patch,80+30*Random.float()*Random.float(),0.5+Random.float()*0.3,0.8,0.2)}
+ static rateLocation(model,patch){let rate=0;
+  for(const p of model.patches)if(p.ward!==null&&pBorders(p.shape,patch.shape)){
+   if(p.ward instanceof Park)rate--;else if(p.ward instanceof Slum)rate++}
+  return rate}
+ getLabel(){return'Patriciate'}}
+class Slum extends CommonWard{constructor(model,patch){
+  super(model,patch,10+30*Random.float()*Random.float(),0.6+Random.float()*0.4,0.8,0.03)}
+ static rateLocation(model,patch){
+  return -pDistance(patch.shape,model.plaza?pCenter(model.plaza.shape):model.center)}
+ getLabel(){return'Slum'}}
+class Market extends Ward{createGeometry(){
+ const statue=Random.bool(0.6);
+ const offset=statue||Random.bool(0.3);
+ let v0=null,v1=null;
+ if(statue||offset){let length=-1;const n=this.patch.shape.length;
+  for(let i=0;i<n;i++){const p0=this.patch.shape[i],p1=this.patch.shape[(i+1)%n];
+   const l=dist(p0,p1);if(l>length){length=l;v0=p0;v1=p1}}}
+ let obj;
+ if(statue){obj=pRect(1+Random.float(),1+Random.float());
+  const ang=Math.atan2(v1.y-v0.y,v1.x-v0.x);
+  const c=Math.cos(ang),s=Math.sin(ang);
+  for(const v of obj){const vx=v.x*c-v.y*s,vy=v.y*c+v.x*s;v.x=vx;v.y=vy}}
+ else obj=pRegular(16,1+Random.float());
+ let objPt;
+ if(offset){const gravity=interpolate(v0,v1);
+  objPt=interpolate(pCentroid(this.patch.shape),gravity,0.2+Random.float()*0.4)}
+ else objPt=pCentroid(this.patch.shape);
+ for(const v of obj)v.offset(objPt.x,objPt.y);
+ this.geometry=[obj]}
+ static rateLocation(model,patch){
+  for(const p of model.inner)
+   if(p.ward instanceof Market&&pBorders(p.shape,patch.shape))return Infinity;
+  return model.plaza?pSquare(patch.shape)/pSquare(model.plaza.shape):
+   pDistance(patch.shape,model.center)}
+ getLabel(){return'Market'}}
+class Castle extends Ward{constructor(model,patch){super(model,patch);
+  const reserved=patch.shape.filter(v=>model.patchByVertex(v).some(p=>!p.withinCity));
+  this.wall=new CurtainWall(true,model,[patch],reserved)}
+ createGeometry(){const block=pShrinkEq(this.patch.shape,MAIN_STREET*2);
+  this.geometry=Ward.createOrthoBuilding(block,Math.sqrt(Math.abs(pSquare(block)))*4,0.6)}
+ getLabel(){return'Castle'}}
+class Cathedral extends Ward{createGeometry(){
+ if(Random.bool(0.4))this.geometry=Cutter.ring(this.getCityBlock(),2+Random.float()*4);
+ else this.geometry=Ward.createOrthoBuilding(this.getCityBlock(),50,0.8)}
+ static rateLocation(model,patch){
+  if(model.plaza!==null&&pBorders(patch.shape,model.plaza.shape))
+   return -1/pSquare(patch.shape);
+  return pDistance(patch.shape,model.plaza?pCenter(model.plaza.shape):model.center)*pSquare(patch.shape)}
+ getLabel(){return'Temple'}}
+class GateWard extends CommonWard{constructor(model,patch){
+  super(model,patch,10+50*Random.float()*Random.float(),0.5+Random.float()*0.3,0.7)}
+ getLabel(){return'Gate'}}
+class AdministrationWard extends CommonWard{constructor(model,patch){
+  super(model,patch,80+30*Random.float()*Random.float(),0.1+Random.float()*0.3,0.3)}
+ static rateLocation(model,patch){
+  if(model.plaza!==null)
+   return pBorders(patch.shape,model.plaza.shape)?0:
+    pDistance(patch.shape,pCenter(model.plaza.shape));
+  return pDistance(patch.shape,model.center)}
+ getLabel(){return'Administration'}}
+class MilitaryWard extends Ward{createGeometry(){const block=this.getCityBlock();
+  this.geometry=Ward.createAlleys(block,
+   Math.sqrt(Math.abs(pSquare(block)))*(1+Random.float()),0.1+Random.float()*0.3,0.3,0.25)}
+ static rateLocation(model,patch){
+  if(model.citadel!==null&&pBorders(model.citadel.shape,patch.shape))return 0;
+  if(model.wall!==null&&model.wall.borders(patch))return 1;
+  return(model.citadel===null&&model.wall===null)?0:Infinity}
+ getLabel(){return'Military'}}
+class Park extends Ward{createGeometry(){const block=this.getCityBlock();
+  this.geometry=pCompactness(block)>=0.7?
+   Cutter.radial(block,null,ALLEY):Cutter.semiRadial(block,null,ALLEY)}
+ getLabel(){return'Park'}}
+class Farm extends Ward{createGeometry(){
+ const housing=pRect(4,4);
+ const randV=this.patch.shape[Random.int(0,this.patch.shape.length)];
+ const pos=interpolate(randV,pCentroid(this.patch.shape),0.3+Random.float()*0.4);
+ const ang=Random.float()*Math.PI,c=Math.cos(ang),s=Math.sin(ang);
+ for(const v of housing){const vx=v.x*c-v.y*s,vy=v.y*c+v.x*s;v.x=vx;v.y=vy}
+ for(const v of housing)v.offset(pos.x,pos.y);
+ this.geometry=Ward.createOrthoBuilding(housing,8,0.5)}
+ getLabel(){return'Farm'}}
+
+// ---- CurtainWall ----
+class CurtainWall{
+ constructor(real,model,patches,reserved){this.real=true;this.patches=patches;
+  if(patches.length===1)this.shape=patches[0].shape.slice();
+  else{this.shape=Model.findCircumference(patches);
+   if(real){const smoothFactor=Math.min(1,40/patches.length);
+    const smoothed=this.shape.map(v=>reserved.includes(v)?v:pSmoothVertex(this.shape,v,smoothFactor));
+    for(let i=0;i<this.shape.length;i++)this.shape[i].set(smoothed[i])}}
+  this.segments=this.shape.map(()=>true);
+  this.buildGates(real,model,reserved);this.towers=[]}
+ buildGates(real,model,reserved){this.gates=[];
+  let entrances;
+  if(this.patches.length>1)
+   entrances=this.shape.filter(v=>!reserved.includes(v)&&
+    this.patches.filter(p=>inPoly(p.shape,v)).length>1);
+  else entrances=this.shape.filter(v=>!reserved.includes(v));
+  if(entrances.length===0)throw new GenError('Bad walled area shape!');
+  do{const index=Random.int(0,entrances.length);
+   const gate=entrances[index];this.gates.push(gate);
+   if(real){const outerWards=model.patchByVertex(gate)
+    .filter(w=>!this.patches.includes(w));
+    if(outerWards.length===1){const outer=outerWards[0];
+     if(outer.shape.length>3){
+      const wallv=pNext(this.shape,gate).subtract(pPrev(this.shape,gate));
+      const out=new Pt(wallv.y,-wallv.x);
+      let farthest=null,best=-Infinity;
+      for(const v of outer.shape){let m;
+       if(this.shape.includes(v)||reserved.includes(v))m=-Infinity;
+       else{const d=v.subtract(gate);m=d.dot(out)/d.length()}
+       if(m>best){best=m;farthest=v}}
+      const newPatches=pSplit(outer.shape,gate,farthest).map(half=>new Patch(half));
+      Model.replacePatch(model.patches,outer,newPatches)}}}
+   if(index===0){entrances.splice(0,2);if(entrances.length)entrances.pop()}
+   else if(index===entrances.length-1){
+    entrances.splice(index-1,2);if(entrances.length)entrances.shift()}
+   else entrances.splice(index-1,3)}while(entrances.length>=3);
+  if(this.gates.length===0)throw new GenError('Bad walled area shape!');
+  if(this.real)for(const gate of this.gates)gate.set(pSmoothVertex(this.shape,gate))}
+ buildTowers(){this.towers=[];if(this.real){const len=this.shape.length;
+  for(let i=0;i<len;i++){const t=this.shape[i];
+   if(!this.gates.includes(t)&&(this.segments[(i+len-1)%len]||this.segments[i]))
+    this.towers.push(t)}}}
+ getRadius(){return Math.max(...this.shape.map(v=>v.length()))}
+ bordersBy(p,v0,v1){const index=this.patches.includes(p)?
+  pFindEdge(this.shape,v0,v1):pFindEdge(this.shape,v1,v0);
+  return index!==-1&&this.segments[index]}
+ borders(p){const withinWalls=this.patches.includes(p);const length=this.shape.length;
+  for(let i=0;i<length;i++)if(this.segments[i]){
+   const v0=this.shape[i],v1=this.shape[(i+1)%length];
+   const index=withinWalls?pFindEdge(p.shape,v0,v1):pFindEdge(p.shape,v1,v0);
+   if(index!==-1)return true}
+  return false}}
+
+// ---- Topology ----
+class Topology{constructor(model){this.model=model;
+ this.graph=new Graph();this.pt2node=new Map();this.node2pt=new Map();
+ this.inner=[];this.outer=[];
+ let blocked=[];
+ if(model.citadel!==null)blocked=blocked.concat(model.citadel.shape);
+ if(model.wall!==null)blocked=blocked.concat(model.wall.shape);
+ blocked=blocked.filter(b=>!model.gates.includes(b));
+ this.blocked=blocked;
+ const border=model.border.shape;
+ for(const p of model.patches){const withinCity=p.withinCity;
+  let v1=p.shape[p.shape.length-1];let n1=this.processPoint(v1);
+  for(let i=0;i<p.shape.length;i++){const v0=v1;v1=p.shape[i];
+   const n0=n1;n1=this.processPoint(v1);
+   if(n0!==null&&!border.includes(v0))
+    (withinCity?this.inner:this.outer).push(n0);
+   if(n1!==null&&!border.includes(v1))
+    (withinCity?this.inner:this.outer).push(n1);
+   if(n0!==null&&n1!==null)n0.link(n1,dist(v0,v1))}}
+ this.node2ptList=[...this.node2pt.values()]}
+ processPoint(v){let n;
+  if(this.pt2node.has(v))n=this.pt2node.get(v);
+  else{n=this.graph.add();this.pt2node.set(v,n);this.node2pt.set(n,v)}
+  return this.blocked.includes(v)?null:n}
+ buildPath(from,to,exclude=null){const start=this.pt2node.get(from);
+  const goal=this.pt2node.get(to);
+  if(!start||!goal)return null;
+  const path=this.graph.aStar(start,goal,exclude);
+  return path?path.map(n=>this.node2pt.get(n)):null}}
+
+// ---- Model ----
+const WARD_CLASSES=[CraftsmenWard,CraftsmenWard,MerchantWard,CraftsmenWard,CraftsmenWard,Cathedral,
+ CraftsmenWard,CraftsmenWard,CraftsmenWard,CraftsmenWard,CraftsmenWard,
+ CraftsmenWard,CraftsmenWard,CraftsmenWard,AdministrationWard,CraftsmenWard,
+ Slum,CraftsmenWard,Slum,PatriciateWard,Market,
+ Slum,CraftsmenWard,CraftsmenWard,CraftsmenWard,Slum,
+ CraftsmenWard,CraftsmenWard,CraftsmenWard,MilitaryWard,Slum,
+ CraftsmenWard,Park,PatriciateWard,Market,MerchantWard];
+const RATE_FUNCS=new Map([
+ [MerchantWard,MerchantWard.rateLocation],[PatriciateWard,PatriciateWard.rateLocation],
+ [Slum,Slum.rateLocation],[Market,Market.rateLocation],[Cathedral,Cathedral.rateLocation],
+ [AdministrationWard,AdministrationWard.rateLocation],[MilitaryWard,MilitaryWard.rateLocation]]);
+
+class Model{
+ constructor(nPatches=15,seed=-1,templeNeeded=false){
+  if(seed>0)Random.reset(seed);
+  this.seedUsed=Random.seed;
+  this.nPatches=nPatches===-1?15:nPatches;
+  this.templeNeeded=templeNeeded;
+  this.plazaNeeded=true;this.citadelNeeded=true;this.wallsNeeded=true;
+  this.patches=[];this.inner=[];this.citadel=null;this.plaza=null;this.center=null;
+  this.border=null;this.wall=null;this.gates=[];this.arteries=[];
+  this.streets=[];this.roads=[];this.cityRadius=0;
+  let attempts=0;
+  while(true){attempts++;
+   try{this.build();break}
+   catch(e){if(!(e instanceof GenError))throw e;
+    if(attempts>400)throw e}}}
+ build(){this.streets=[];this.roads=[];
+  this.buildPatches();this.optimizeJunctions();this.buildWalls();
+  this.buildStreets();this.createWards();this.buildGeometry()}
+ buildPatches(){const sa=Random.float()*2*Math.PI;
+  const points=[];
+  for(let i=0;i<this.nPatches*8;i++){const a=sa+Math.sqrt(i)*5;
+   const r=i===0?0:10+i*(2+Random.float());
+   points.push(new Pt(Math.cos(a)*r,Math.sin(a)*r))}
+  let voronoi=Voronoi.build(points);
+  for(let k=0;k<3;k++){const toRelax=[voronoi.points[0],voronoi.points[1],voronoi.points[2]];
+   toRelax.push(voronoi.points[this.nPatches]);
+   voronoi=Voronoi.relax(voronoi,toRelax)}
+  voronoi.points.sort((p1,p2)=>
+   sgn(p1.length()===0?0:(p1.length()>0?1:-1))-sgn(p2.length()===0?0:(p2.length()>0?1:-1)));
+  const regions=voronoi.partioning();
+  this.patches=[];this.inner=[];
+  let count=0;
+  for(const r of regions){const patch=Patch.fromRegion(r);
+   this.patches.push(patch);
+   if(count===0){this.center=patch.shape.reduce((m,v)=>v.length()<m.length()?v:m);
+    if(this.plazaNeeded)this.plaza=patch}
+   else if(count===this.nPatches&&this.citadelNeeded){
+    this.citadel=patch;this.citadel.withinCity=true}
+   if(count<this.nPatches){patch.withinCity=true;
+    patch.withinWalls=this.wallsNeeded;this.inner.push(patch)}
+   count++}}
+ optimizeJunctions(){const toOptimize=this.citadel===null?
+   this.inner:this.inner.concat([this.citadel]);
+  const wards2clean=[];
+  for(const w of toOptimize){let index=0;
+   while(index<w.shape.length){const v0=w.shape[index];
+    const v1=w.shape[(index+1)%w.shape.length];
+    if(v0!==v1&&dist(v0,v1)<8){
+     for(const w1 of this.patchByVertex(v1))if(w1!==w){
+      w1.shape[w1.shape.indexOf(v1)]=v0;wards2clean.push(w1)}
+     v0.addEq(v1);v0.scaleEq(0.5);
+     w.shape.splice(w.shape.indexOf(v1),1);continue}
+    index++}}
+  for(const w of wards2clean)for(let i=0;i<w.shape.length;i++){
+   const v=w.shape[i];let j=i+1;
+   while(j<w.shape.length){if(w.shape[j]===v)w.shape.splice(j,1);else j++}}}
+ buildWalls(){const reserved=this.citadel!==null?this.citadel.shape.slice():[];
+  this.border=new CurtainWall(this.wallsNeeded,this,this.inner,reserved);
+  if(this.wallsNeeded){this.wall=this.border;this.wall.buildTowers()}
+  const radius=this.border.getRadius();
+  this.patches=this.patches.filter(p=>pDistance(p.shape,this.center)<radius*3);
+  this.gates=this.border.gates.slice();
+  if(this.citadel!==null){try{
+   const castle=new Castle(this,this.citadel);
+   castle.wall.buildTowers();
+   if(pCompactness(this.citadel.shape)<0.75)throw new GenError('Bad citadel shape!');
+   this.citadel.ward=castle;
+   this.gates=this.gates.concat(castle.wall.gates)}
+   catch(e){if(!(e instanceof GenError))throw e;
+    // tiny towns: citadel borders no city ward -> countryside for this attempt
+    this.citadel.withinCity=false;this.citadel.withinWalls=false;
+    this.citadel=null}}}
+ buildStreets(){this.topology=new Topology(this);
+  for(const gate of this.gates){
+   const end=this.plaza!==null?
+    this.plaza.shape.reduce((m,v)=>dist(v,gate)<dist(m,gate)?v:m):this.center;
+   const street=this.topology.buildPath(gate,end,this.topology.outer);
+   if(street!==null){this.streets.push(street);
+    if(this.border.gates.includes(gate)){
+     const dir=gate.norm(1000);let start=null,best=Infinity;
+     for(const p of this.topology.node2ptList){const d=dist(p,dir);
+      if(d<best){best=d;start=p}}
+     const road=this.topology.buildPath(start,gate,this.topology.inner);
+     if(road!==null)this.roads.push(road)}}
+   else throw new GenError('Unable to build a street!')}
+  this.tidyUpRoads();
+  for(const a of this.arteries){const smoothed=pSmoothVertexEq(a,3);
+   for(let i=1;i<a.length-1;i++)a[i].set(smoothed[i])}}
+ tidyUpRoads(){const segments=[];
+  const cut2segments=street=>{let v1=street[0];
+   for(let i=1;i<street.length;i++){const v0=v1;v1=street[i];
+    if(this.plaza!==null&&inPoly(this.plaza.shape,v0)&&inPoly(this.plaza.shape,v1))
+     continue;
+    let exists=false;
+    for(const seg of segments)if(seg[0]===v0&&seg[1]===v1){exists=true;break}
+    if(!exists)segments.push([v0,v1])}};
+  for(const s of this.streets)cut2segments(s);
+  for(const r of this.roads)cut2segments(r);
+  this.arteries=[];
+  while(segments.length>0){const seg=segments.pop();
+   let attached=false;
+   for(const a of this.arteries){
+    if(a[0]===seg[1]){a.unshift(seg[0]);attached=true;break}
+    if(a[a.length-1]===seg[0]){a.push(seg[1]);attached=true;break}}
+   if(!attached)this.arteries.push([seg[0],seg[1]])}}
+ createWards(){let unassigned=this.inner.slice();
+  if(this.plaza!==null){this.plaza.ward=new Market(this,this.plaza);
+   unassigned=unassigned.filter(p=>p!==this.plaza)}
+  for(const gate of this.border.gates)
+   for(const patch of this.patchByVertex(gate))
+    if(patch.withinCity&&patch.ward===null&&
+     Random.bool(this.wall===null?0.2:0.5)){
+     patch.ward=new GateWard(this,patch);
+     unassigned=unassigned.filter(p=>p!==patch)}
+  const wards=WARD_CLASSES.slice();
+  if(this.templeNeeded){const i=wards.indexOf(Cathedral);
+   if(i!==-1)wards.splice(i,1);wards.unshift(Cathedral)}
+  for(let i=0;i<Math.floor(wards.length/10);i++){
+   const index=Random.int(0,wards.length-1);
+   const tmp=wards[index];wards[index]=wards[index+1];wards[index+1]=tmp}
+  while(unassigned.length>0){
+   const wardClass=wards.length>0?wards.shift():Slum;
+   const rateFunc=RATE_FUNCS.get(wardClass);
+   let bestPatch;
+   if(rateFunc===undefined){
+    do{bestPatch=unassigned[Random.int(0,unassigned.length-1)]}
+    while(bestPatch.ward!==null)}
+   else bestPatch=unassigned.reduce((m,p)=>
+    (p.ward!==null?Infinity:rateFunc(this,p))<
+    (m.ward!==null?Infinity:rateFunc(this,m))?p:m);
+   bestPatch.ward=new wardClass(this,bestPatch);
+   unassigned=unassigned.filter(p=>p!==bestPatch)}
+  if(this.wall!==null)
+   for(const gate of this.wall.gates)
+    if(!Random.bool(1/(this.nPatches-5)))
+     for(const patch of this.patchByVertex(gate))
+      if(patch.ward===null){patch.withinCity=true;
+       patch.ward=new GateWard(this,patch)}
+  this.cityRadius=0;
+  for(const patch of this.patches){
+   if(patch.withinCity)for(const v of patch.shape)
+    this.cityRadius=Math.max(this.cityRadius,v.length());
+   else if(patch.ward===null)
+    patch.ward=(Random.bool(0.2)&&pCompactness(patch.shape)>=0.7)?
+     new Farm(this,patch):new Ward(this,patch)}}
+ buildGeometry(){for(const patch of this.patches)patch.ward.createGeometry()}
+ patchByVertex(v){return this.patches.filter(p=>inPoly(p.shape,v))}
+ getNeighbour(patch,v){const next=pNext(patch.shape,v);
+  for(const p of this.patches)if(pFindEdge(p.shape,next,v)!==-1)return p;
+  return null}
+ getNeighbours(patch){return this.patches.filter(p=>p!==patch&&pBorders(p.shape,patch.shape))}
+ isEnclosed(patch){return patch.withinCity&&
+  (patch.withinWalls||this.getNeighbours(patch).every(p=>p.withinCity))}
+ static findCircumference(wards){
+  if(wards.length===0)return[];
+  if(wards.length===1)return wards[0].shape.slice();
+  const A=[],B=[];
+  for(const w1 of wards){const n=w1.shape.length;
+   for(let i=0;i<n;i++){const a=w1.shape[i],b=w1.shape[(i+1)%n];
+    let outerEdge=true;
+    for(const w2 of wards)if(w2!==w1&&pFindEdge(w2.shape,b,a)!==-1){
+     outerEdge=false;break}
+    if(outerEdge){A.push(a);B.push(b)}}}
+  const result=[];let index=0;
+  do{result.push(A[index]);index=A.indexOf(B[index])}while(index!==0);
+  return result}
+ static replacePatch(lst,el,newEls){const index=lst.indexOf(el);
+  lst.splice(index,1,...newEls)}}
+
+// ============================================================
+// pipeline additions: river band, warp mesh, scatter rows
+// ============================================================
+function buildRiver(R,rng){const ang=rng()*Math.PI;
+ const w=9+rng()*3;
+ const rdx=Math.cos(ang),rdz=Math.sin(ang),rnx=-rdz,rnz=rdx;
+ const ph=rng()*6.28,amp=0.10*R,pts=[];
+ for(let t=-16;t<=16;t++){const s=t*R/12,off=amp*Math.sin(s*0.02+ph);
+  pts.push([rdx*s+rnx*off,rdz*s+rnz*off])}
+ return{pts,w}}
+function riverDist(x,z,river,w){let best=1e9;
+ for(let i=0;i<river.length-1;i++){const[ax,az]=river[i],[bx,bz]=river[i+1];
+  const dx=bx-ax,dz=bz-az,l2=dx*dx+dz*dz||1;
+  let t=((x-ax)*dx+(z-az)*dz)/l2;t=Math.max(0,Math.min(1,t));
+  best=Math.min(best,Math.hypot(x-(ax+t*dx),z-(az+t*dz)))}
+ return best}
+class WarpMesh{
+ constructor(x0,x1,z0,z1,spacing,rng,warp,R){
+  this.s=spacing;
+  this.nx=Math.max(2,Math.ceil((x1-x0)/spacing)+1);
+  this.nz=Math.max(2,Math.ceil((z1-z0)/spacing)+1);
+  this.base=[];this.off=[];
+  const amp=warp*R*0.10;
+  const f1=0.018+rng()*0.012,f2=0.045+rng()*0.02;
+  const p1=rng()*6.28,p2=rng()*6.28,p3=rng()*6.28,p4=rng()*6.28,p5=rng()*6.28;
+  for(let j=0;j<this.nz;j++)for(let i=0;i<this.nx;i++){
+   const bx=x0+i*spacing,bz=z0+j*spacing;
+   this.base.push([bx,bz]);
+   if(warp<=0)this.off.push([0,0]);
+   else this.off.push([
+    amp*(0.6*Math.sin(bx*f1+p1)*Math.cos(bz*f1+p2)+0.4*Math.sin((bx+bz)*f2+p3)),
+    amp*(0.6*Math.cos(bx*f1+p4)*Math.sin(bz*f1+p1)+0.4*Math.cos((bx-bz)*f2+p5))])}
+  this.rad=spacing*2.2}
+ ev(x,z){let dx=0,dz=0,ws=0;
+  for(let k=0;k<this.base.length;k++){const ox=this.off[k][0],oz=this.off[k][1];
+   if(!ox&&!oz)continue;
+   const d=Math.hypot(x-this.base[k][0],z-this.base[k][1]);
+   if(d>=this.rad)continue;
+   const w=0.5*(1+Math.cos(Math.PI*d/this.rad));
+   dx+=ox*w;dz+=oz*w;ws+=w}
+  return ws?[x+dx/ws,z+dz/ws]:[x,z]}
+ evPoly(poly){return poly.map(p=>this.ev(p.x,p.y))}
+ evList(pts){return pts.map(p=>this.ev(p[0],p[1]))}
+ rotD(x,z){const a=this.ev(x+1,z),b=this.ev(x-1,z);
+  return Math.atan2(a[1]-b[1],a[0]-b[0])*180/Math.PI}
+ brush(tool,cx,cz,radius,dx,dz,s=1){
+  for(let k=0;k<this.base.length;k++){const bx=this.base[k][0],bz=this.base[k][1];
+   const d=Math.hypot(bx-cx,bz-cz);if(d>=radius)continue;
+   const t=1-d/radius;
+   const f=(tool==='displace'||tool==='bloat')?0.5*(1+Math.cos(Math.PI*d/radius)):t*t*(3-2*t)*t;
+   const o=this.off[k];
+   if(tool==='displace'){o[0]+=dx*f*s;o[1]+=dz*f*s}
+   else if(tool==='liquify'){o[0]+=(dx*0.8+dz*0.25)*f*1.4*s;o[1]+=(dz*0.8-dx*0.25)*f*1.4*s}
+   else if(tool==='bloat'){const amt=(Math.hypot(dx,dz)||2)*0.6*s,
+    l=Math.hypot(bx-cx,bz-cz)||1;
+    o[0]+=(bx-cx)/l*amt*f;o[1]+=(bz-cz)/l*amt*f}
+   else if(tool==='rotate'){const ang=(dx+dz)*0.01*s*f,
+    vx=bx-cx,vz=bz-cz,c=Math.cos(ang),sn=Math.sin(ang);
+    o[0]+=cx+vx*c-vz*sn-bx;o[1]+=cz+vx*sn+vz*c-bz}
+   else if(tool==='relax'){o[0]+=-o[0]*f*0.25*s;o[1]+=-o[1]*f*0.25*s}}}
+ snapshot(){return this.off.map(o=>o.slice())}
+ restore(snap){for(let k=0;k<this.off.length;k++){
+  this.off[k][0]=snap[k][0];this.off[k][1]=snap[k][1]}}}
+function polyFrame(poly){const n=poly.length;
+ let best=0,bl=-1;
+ for(let i=0;i<n;i++){const l=Math.hypot(poly[(i+1)%n].x-poly[i].x,
+  poly[(i+1)%n].y-poly[i].y);if(l>bl){bl=l;best=i}}
+ const P0=poly[best],P1=poly[(best+1)%n];
+ const ang=Math.atan2(P1.y-P0.y,P1.x-P0.x)*180/Math.PI;
+ const r=ang*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
+ const xs=poly.map(p=>p.x*c+p.y*s),zs=poly.map(p=>-p.x*s+p.y*c);
+ const w=Math.max(...xs)-Math.min(...xs),d=Math.max(...zs)-Math.min(...zs);
+ const cx=(Math.min(...xs)+Math.max(...xs))/2,cz=(Math.min(...zs)+Math.max(...zs))/2;
+ return{cx:c*cx-s*cz,cz:s*cx+c*cz,ang,w,d}}
+
+function genTown(seed,warp,size){
+ const m=new Model(size,seed,true);
+ // deterministic secondary rng for river/mesh (separate stream)
+ let rs=seed>>>0;const rng=()=>{rs=(rs*48271)%2147483647;return rs/2147483647};
+ const R=Math.max(m.cityRadius,50);
+ const river=buildRiver(R,rng);
+ const allx=[],ally=[];
+ for(const p of m.patches)for(const v of p.shape){allx.push(v.x);ally.push(v.y)}
+ const mesh=new WarpMesh(Math.min(...allx)-20,Math.max(...allx)+20,
+  Math.min(...ally)-20,Math.max(...ally)+20,R/5,rng,warp,R);
+ const rows=[];
+ for(const patch of m.patches){const label=patch.ward.getLabel()||'Empty';
+  if(label==='Empty')continue;
+  for(const poly of patch.ward.geometry){
+   const c=pCenter(poly);
+   if(riverDist(c.x,c.y,river.pts,river.w)<river.w/2+1)continue;
+   const F=polyFrame(poly);
+   const q=mesh.ev(F.cx,F.cz);
+   rows.push({x:q[0],z:q[1],rot:((F.ang+mesh.rotD(F.cx,F.cz))%360+360)%360,
+    w:+F.w.toFixed(2),d:+F.d.toFixed(2),h:5,type:label})}}
+ const castleW=m.citadel!==null&&m.citadel.ward instanceof Castle?
+  m.citadel.ward:null;
+ return{seed,warp,size,R,model:m,mesh,river,rows,
+  wall:mesh.evList(m.wall?m.wall.shape.map(v=>[v.x,v.y]):[]),
+  towers:mesh.evList(m.wall?m.wall.towers.map(v=>[v.x,v.y]):[]),
+  gates:mesh.evList(m.gates.map(v=>[v.x,v.y])),
+  roads:m.arteries.map(a=>mesh.evList(a.map(v=>[v.x,v.y]))),
+  riverPts:mesh.evList(river.pts),
+  castleWall:castleW?mesh.evPoly(castleW.wall.shape):null,
+  castleTowers:castleW?mesh.evList(castleW.wall.towers.map(v=>[v.x,v.y])):[],
+  plaza:m.plaza?mesh.evPoly(m.plaza.shape):null}}
+
+// ============================================================
+// rendering (CityMap.hx) + UI
+// ============================================================
+const PAPER='#ccc5b8',LIGHT='#99948a',MEDIUM='#67635c',DARK='#1a1917',
+ WATER='#a9c1cf',WATER_D='#7d99a8',
+ NORMAL_STROKE=0.3,THICK_STROKE=1.8; // MAIN_STREET defined above (wards)
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const view={s:2,ox:0,oz:0};
+let T=null,snap0=null,V=null,mode='map',tool='displace',drag=null,hov=null;
+const countsEl=document.getElementById('counts'),hint=document.getElementById('hint'),
+ brushEl=document.getElementById('brush'),brushval=document.getElementById('brushval'),
+ sizeEl=document.getElementById('size'),sizeval=document.getElementById('sizeval'),
+ warpEl=document.getElementById('warp'),warpval=document.getElementById('warpval');
+
+function current(){return T} // layers already evaluated in genTown / after brushes
+
+function fit(){const all=[...T.wall,...T.rows.map(r=>[r.x,r.z])];
+ const xs=all.map(p=>p[0]),zs=all.map(p=>p[1]);
+ const x0=Math.min(...xs)-15,x1=Math.max(...xs)+15,z0=Math.min(...zs)-15,z1=Math.max(...zs)+15;
+ view.s=Math.min(cv.width/(x1-x0),cv.height/(z1-z0));view.ox=x0;view.oz=z0}
+const X=x=>(x-view.ox)*view.s,Z=z=>(z-view.oz)*view.s;
+
+function draw(brushPt){
+ ctx.clearRect(0,0,cv.width,cv.height);
+ ctx.fillStyle=PAPER;ctx.fillRect(0,0,cv.width,cv.height);
+ // river
+ ctx.lineCap='round';
+ ctx.strokeStyle=WATER_D;ctx.lineWidth=Math.max(3,T.river.w*view.s+2);
+ ctx.beginPath();T.riverPts.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
+ ctx.strokeStyle=WATER;ctx.lineWidth=Math.max(1,T.river.w*view.s);
+ ctx.beginPath();T.riverPts.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
+ // roads (drawRoad: casing + core)
+ for(const L of T.roads){
+  ctx.strokeStyle=MEDIUM;ctx.lineWidth=(MAIN_STREET+NORMAL_STROKE)*view.s;
+  ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
+  ctx.strokeStyle=PAPER;ctx.lineWidth=(MAIN_STREET-NORMAL_STROKE)*view.s;
+  ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke()}
+ // city wall + towers + gates
+ if(T.wall.length){ctx.strokeStyle=DARK;ctx.lineWidth=THICK_STROKE*view.s;
+  ctx.beginPath();T.wall.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));
+  ctx.closePath();ctx.stroke();
+  ctx.fillStyle=DARK;
+  for(const t of T.towers){ctx.beginPath();ctx.arc(X(t[0]),Z(t[1]),THICK_STROKE*view.s,0,7);ctx.fill()}
+  for(const g of T.gates){ctx.beginPath();ctx.arc(X(g[0]),Z(g[1]),THICK_STROKE*1.2*view.s,0,7);
+   ctx.fillStyle=PAPER;ctx.fill();ctx.strokeStyle=DARK;ctx.lineWidth=NORMAL_STROKE*2*view.s;ctx.stroke()}}
+ // castle wall (larger strokes, as the original)
+ if(T.castleWall){ctx.strokeStyle=DARK;ctx.lineWidth=THICK_STROKE*1.5*view.s;
+  ctx.beginPath();T.castleWall.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));
+  ctx.closePath();ctx.stroke();
+  ctx.fillStyle=DARK;
+  for(const t of T.castleTowers){ctx.beginPath();ctx.arc(X(t[0]),Z(t[1]),THICK_STROKE*1.5*view.s,0,7);ctx.fill()}}
+ // buildings: light fill + dark stroke (heavier for Castle/Temple)
+ for(const r of T.rows){const a=r.rot*Math.PI/180,c=Math.cos(a),s=Math.sin(a);
+  const hw=r.w/2,hd=r.d/2;
+  const stroke=NORMAL_STROKE*2*((r.type==='Castle'||r.type==='Temple')?2:1)*view.s;
+  ctx.beginPath();
+  [[1,1],[1,-1],[-1,-1],[-1,1],[1,1]].forEach(([sx,sz],i)=>{
+   const lx=sx*hw,lz=sz*hd;
+   const px=X(r.x+lx*c-lz*s),pz=Z(r.z+lx*s+lz*c);
+   i?ctx.lineTo(px,pz):ctx.moveTo(px,pz)});
+  ctx.fillStyle=LIGHT;ctx.fill();ctx.strokeStyle=DARK;ctx.lineWidth=Math.max(0.5,stroke);ctx.stroke()}
+ // warp mesh: RED lines (original warp mode)
+ if(mode==='warp'){ctx.strokeStyle='rgba(196,49,75,.75)';ctx.lineWidth=1.2;
+  const M=T.mesh;
+  const evAt=(k)=>{const b=M.base[k];return M.ev(b[0],b[1])};
+  for(let j=0;j<M.nz;j++){ctx.beginPath();
+   for(let i=0;i<M.nx;i++){const q=evAt(j*M.nx+i);
+    i?ctx.lineTo(X(q[0]),Z(q[1])):ctx.moveTo(X(q[0]),Z(q[1]))}ctx.stroke()}
+  for(let i=0;i<M.nx;i++){ctx.beginPath();
+   for(let j=0;j<M.nz;j++){const q=evAt(j*M.nx+i);
+    j?ctx.lineTo(X(q[0]),Z(q[1])):ctx.moveTo(X(q[0]),Z(q[1]))}ctx.stroke()}}
+ if(mode==='warp'&&hov){ctx.beginPath();
+  ctx.arc(X(hov[0]),Z(hov[1]),+brushEl.value*view.s,0,7);
+  ctx.strokeStyle='#c4314b';ctx.setLineDash([6,4]);ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([])}
+ const n={};T.rows.forEach(r=>n[r.type]=(n[r.type]||0)+1);
+ countsEl.textContent=T.rows.length+' buildings · town #'+T.seed;
+}
+
+// ---- warp tools (original set) ----
+const TOOLS=[
+ ['displace','Displace','grab mesh nodes — they follow the cursor','D'],
+ ['liquify','Liquify','softer smear','L'],
+ ['rotate','Rotate','twist around the brush','R'],
+ ['bloat','Bloat','inflate cells','B'],
+ ['relax','Relax','smooth the mesh','X'],
+ ['equalize','Equalize','snap building angles','E'],
+ ['measure','Measure','click two points','M']];
+const toolsEl=document.getElementById('tools'),warpbar=document.getElementById('warpbar'),
+ menu=document.getElementById('menu');
+TOOLS.forEach(([id,name,desc,key])=>{const b=document.createElement('button');
+ b.className=id===tool?'on':'';b.innerHTML=name+'<kbd>'+key+'</kbd>';b.title=desc;
+ b.onclick=()=>{tool=id;[...toolsEl.children].forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');hint.textContent=name.toLowerCase()+' · '+desc};
+ toolsEl.appendChild(b)});
+function setMode(m){mode=m;measurePts.length=0;tip.style.display='none';
+ warpbar.style.display=m==='warp'?'flex':'none';
+ hint.textContent=m==='warp'?'displace · drag to pull the mesh nodes (red)':
+  'right-click: menu · Enter: new city · hover a building';
+ if(T)draw(hov)}
+function reevaluate(){ // layers through the (possibly brushed) mesh
+ T.wall=T.mesh.evList(T.model.wall?T.model.wall.shape.map(v=>[v.x,v.y]):[]);
+ T.towers=T.mesh.evList(T.model.wall?T.model.wall.towers.map(v=>[v.x,v.y]):[]);
+ T.gates=T.mesh.evList(T.model.gates.map(v=>[v.x,v.y]));
+ T.roads=T.model.arteries.map(a=>T.mesh.evList(a.map(v=>[v.x,v.y])));
+ T.riverPts=T.mesh.evList(T.river.pts);
+ const cw=T.model.citadel!==null&&T.model.citadel.ward instanceof Castle?T.model.citadel.ward:null;
+ T.castleWall=cw?T.mesh.evPoly(cw.wall.shape):null;
+ T.castleTowers=cw?T.mesh.evList(cw.wall.towers.map(v=>[v.x,v.y])):[];
+ T.plaza=T.model.plaza?T.mesh.evPoly(T.model.plaza.shape):null;
+ for(const r of T.baseRows){const q=T.mesh.ev(r.bx,r.bz);
+  r.x=q[0];r.z=q[1];r.rot=((r.bAng+T.mesh.rotD(r.bx,r.bz))%360+360)%360}}
+
+// ---- menu / exports ----
+function download(name,text){const a=document.createElement('a');
+ a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));a.download=name;a.click()}
+function exportCSV(){let s='id,pos_x,pos_y,pos_z,rot_y_deg,type,width_m,depth_m,height_m,scale,district,seed,warp\n';
+ T.rows.forEach((b,i)=>{s+=[i,b.x.toFixed(3),0,b.z.toFixed(3),
+  (((b.rot%360)+360)%360).toFixed(2),b.type,b.w,b.d,b.h,1,b.type,T.seed,T.warp].join(',')+'\n'});
+ download('buildings_seed'+T.seed+'.csv',s)}
+function exportJSON(){download('town_seed'+T.seed+'.json',
+ JSON.stringify({seed:T.seed,warp:T.warp,size:T.size,radius:T.R,
+  buildings:T.rows,wall:T.wall,roads:T.roads,river:T.riverPts},null,1))}
+const MENU=[['New city','Enter',()=>regen()],['Warp mode','W',()=>setMode('warp')],
+ ['Export CSV (Houdini/PCG)','',()=>exportCSV()],['Export JSON','',()=>exportJSON()]];
+const WARPMENU=[['Apply warp','Enter',()=>setMode('map')],
+ ['Discard warp','Esc',()=>{resetWarp();setMode('map')}],
+ ['Export CSV (Houdini/PCG)','',()=>exportCSV()],['Export JSON','',()=>exportJSON()]];
+function openMenu(x,y){menu.innerHTML='';
+ for(const[label,key,fn]of(mode==='warp'?WARPMENU:MENU)){const b=document.createElement('button');
+  b.textContent=label+(key?'   ['+key+']':'');
+  b.onclick=()=>{menu.style.display='none';fn()};menu.appendChild(b)}
+ menu.style.display='flex';menu.style.left=x+'px';menu.style.top=y+'px'}
+
+// ---- pointer / keys ----
+const toWorld=e=>{const r=cv.getBoundingClientRect(),
+ sx=cv.width/r.width,sz=cv.height/r.height;
+ return[(e.clientX-r.left)*sx/view.s+view.ox,(e.clientY-r.top)*sz/view.s+view.oz]};
+function grabNodes(x,z){const r=+brushEl.value,out=[];
+ const M=T.mesh;
+ for(let k=0;k<M.base.length;k++){
+  const d=Math.hypot(M.base[k][0]-x,M.base[k][1]-z);
+  if(d<r)out.push({off:M.off[k],o0:[M.off[k][0],M.off[k][1]],
+   f:0.5*(1+Math.cos(Math.PI*d/r))})}
+ return out}
+const tip=document.createElement('div');
+tip.style.cssText='position:fixed;z-index:9;display:none;pointer-events:none;background:rgba(26,25,23,.92);color:#ccc5b8;font:12px Georgia,serif;padding:4px 9px;border-radius:4px';
+document.body.appendChild(tip);
+function hoverTip(e,x,z){
+ for(const b of T.rows){const a=b.rot*Math.PI/180,c=Math.cos(a),s=Math.sin(a);
+  const dx=x-b.x,dz=z-b.z,lx=dx*c+dz*s,lz=-dx*s+dz*c;
+  if(Math.abs(lx)<=b.w/2&&Math.abs(lz)<=b.d/2){
+   tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY+10)+'px';
+   tip.textContent=b.type+' · '+b.w+'×'+b.d+' m';
+   cv.style.cursor='pointer';return}}
+ tip.style.display='none';cv.style.cursor='crosshair'}
+let measurePts=[];
+cv.addEventListener('contextmenu',e=>{e.preventDefault();openMenu(e.clientX,e.clientY)});
+document.addEventListener('click',e=>{if(!menu.contains(e.target))menu.style.display='none'});
+cv.addEventListener('pointerdown',e=>{if(e.button===2)return;
+ cv.setPointerCapture(e.pointerId);const[x,z]=toWorld(e);
+ if(mode!=='warp')return;
+ if(tool==='measure'){measurePts.push([x,z]);
+  if(measurePts.length===2){
+   hint.textContent='distance: '+Math.hypot(measurePts[0][0]-measurePts[1][0],
+    measurePts[0][1]-measurePts[1][1]).toFixed(1)+' m';measurePts=[]}
+  else hint.textContent='measure · click second point';return}
+ if(tool==='equalize'){
+  T.baseRows.forEach(b=>{if(Math.hypot(b.bx-x,b.bz-z)<+brushEl.value)
+   b.bAng=Math.round(b.bAng/15)*15});
+  reevaluate();draw(hov);return}
+ drag={x,z,nodes:grabNodes(x,z)}});
+cv.addEventListener('pointermove',e=>{const[x,z]=toWorld(e);hov=[x,z];
+ if(drag&&mode==='warp'){
+  if(tool==='displace'){
+   const dx=x-drag.x,dz=z-drag.z;
+   for(const g of drag.nodes){g.off[0]=g.o0[0]+dx*g.f;g.off[1]=g.o0[1]+dz*g.f}}
+  else{T.mesh.brush(tool,(drag.x+x)/2,(drag.z+z)/2,+brushEl.value,x-drag.x,z-drag.z);
+   drag={x,z,nodes:grabNodes(x,z)}}
+  reevaluate();draw(hov)}
+ else if(mode==='map')hoverTip(e,x,z)});
+cv.addEventListener('pointerup',()=>drag=null);
+cv.addEventListener('wheel',e=>{e.preventDefault();
+ brushEl.value=Math.max(10,Math.min(260,+brushEl.value+(e.deltaY>0?-8:8)));
+ brushval.textContent=brushEl.value;if(mode==='warp')draw(hov)},{passive:false});
+document.addEventListener('keydown',e=>{
+ const k=e.key.toLowerCase();
+ const map={d:'displace',l:'liquify',r:'rotate',b:'bloat',x:'relax',e:'equalize',m:'measure'};
+ if(mode==='warp'&&map[k]){tool=map[k];
+  [...toolsEl.children].forEach((x,i)=>x.classList.toggle('on',TOOLS[i][0]===tool));
+  hint.textContent=tool+' · drag to warp the mesh'}
+ if(k==='w'){setMode(mode==='warp'?'map':'warp');return}
+ if(e.key==='Enter'){if(mode==='warp')setMode('map');else regen();return}
+ if(e.key==='Escape'){if(mode==='warp'){resetWarp();setMode('map')}return}
+ if(mode==='warp'&&(e.key==='+'||e.key==='='))brushEl.value=Math.min(260,+brushEl.value+10);
+ if(mode==='warp'&&e.key==='-')brushEl.value=Math.max(10,+brushEl.value-10);
+ brushval.textContent=brushEl.value;if(mode==='warp')draw(hov)});
+
+// ---- controls ----
+sizeEl.oninput=()=>sizeval.textContent=sizeEl.value;
+warpEl.oninput=()=>warpval.textContent=(+warpEl.value).toFixed(2);
+brushEl.oninput=()=>{brushval.textContent=brushEl.value;if(mode==='warp')draw(hov)};
+function loadTown(seed){try{
+ T=genTown(seed,+warpEl.value,+sizeEl.value||25);
+ // base rows (pre-warp) kept for reevaluation after brushes
+ T.baseRows=T.rows.map(r=>({...r,bx:r.x,bz:r.z,bAng:r.rot}));
+ snap0=T.mesh.snapshot();fit();draw();setMode('map')}
+ catch(e){var d=document.getElementById('err');d.style.display='block';
+  d.textContent='Generation error: '+(e&&e.message?e.message:e)+' — click \"new city\" to retry.'}}
+function regen(){
+ const seed=1+Math.floor(Math.random()*2147483646); // pure random
+ loadTown(seed)}
+function resetWarp(){if(snap0){T.mesh.restore(snap0);reevaluate();draw(hov)}}
+document.getElementById('regen').onclick=regen;
+const params=new URLSearchParams(location.search);
+const requestedSize=Number.parseInt(params.get('size')||'25',10);
+const requestedSeed=Number.parseInt(params.get('seed')||'1429458196',10);
+sizeEl.value=Math.max(6,Math.min(40,Number.isFinite(requestedSize)?requestedSize:25));
+sizeval.textContent=sizeEl.value;
+loadTown(requestedSeed>0&&requestedSeed<2147483647?requestedSeed:1429458196);
+</script>
+</body>
+</html>
