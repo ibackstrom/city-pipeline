@@ -3,37 +3,287 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>city-pipeline — town preview</title>
+<title>city-pipeline — town lab (seed + warp)</title>
 <style>
-body{font-family:system-ui,sans-serif;background:#111418;color:#e8e8e8;margin:0;padding:24px}
-main{max-width:900px;margin:0 auto}
-img{background:#1a1d22;border:1px solid #333;border-radius:8px;width:100%;height:auto}
-code,pre{background:#22262d;padding:2px 6px;border-radius:6px}
-pre{padding:12px;overflow:auto}
-a{color:#8ab4ff}
-.meta{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0}
+:root{--bg:#111418;--panel:#1a1e24;--line:#2c323b;--txt:#e8e8e8;--dim:#9aa3af;--acc:#8ab4ff}
+*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--txt);margin:0}
+header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+header h1{font-size:16px;margin:0 8px 0 0}label{font-size:12px;color:var(--dim);display:flex;gap:6px;align-items:center}
+input[type=number],input[type=text]{width:110px;background:#22262d;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+input[type=range]{width:130px}button{background:#2a313b;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px}
+button:hover{border-color:var(--acc)}button.on{background:#31405c;border-color:var(--acc)}
+main{display:grid;grid-template-columns:250px 1fr;gap:0;min-height:calc(100vh - 57px)}
+aside{border-right:1px solid var(--line);padding:14px;background:var(--panel);font-size:13px}
+aside h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:14px 0 8px}
+.tool{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-bottom:6px}
+.tool kbd{margin-left:auto;background:#22262d;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:11px;color:var(--dim)}
+#stage{position:relative;display:flex;align-items:center;justify-content:center;padding:12px}
+canvas{background:#1a1d22;border:1px solid var(--line);border-radius:8px;max-width:100%;cursor:crosshair;touch-action:none}
+#hint{position:absolute;left:24px;bottom:20px;background:rgba(0,0,0,.65);padding:6px 10px;border-radius:6px;font-size:12px;color:var(--dim)}
+#counts{font-size:12px;color:var(--dim);line-height:1.7}
+a{color:var(--acc)}
 </style>
 </head>
 <body>
+<header>
+<h1>town lab</h1>
+<label>seed <input id="seed" type="number" value="1555148727"></label>
+<label>warp <input id="warp" type="range" min="0" max="1" step="0.01" value="0.35"><span id="warpval">0.35</span></label>
+<label>size <input id="size" type="number" value="17" min="5" max="40"></label>
+<button id="regen">Regenerate (Enter)</button>
+<button id="reset">Reset warp (Esc)</button>
+<button id="expcsv">Export CSV → Houdini/PCG</button>
+<button id="expjson">Export JSON</button>
+</header>
 <main>
-<h1>city-pipeline — small town preview</h1>
-<div class="meta">
-<span>seed <code>1555148727</code></span>
-<span>warp <code>0.35</code></span>
-<span>size <code>17</code></span>
-<span>112 buildings</span>
-</div>
-<img src="out_town/preview.svg" alt="town preview">
-<h2>Files</h2>
-<ul>
-<li><a href="out_town/preview.svg">preview.svg</a> — map above</li>
-<li><a href="out_town/buildings.csv">buildings.csv</a> — Houdini / PCG scatter points</li>
-<li><a href="out_town/manifest.json">manifest.json</a> — seed/warp/counts</li>
-<li><a href="city_gen.py">city_gen.py</a> — generator</li>
-</ul>
-<h2>Regenerate</h2>
-<pre>python3 city_gen.py --seed 1555148727 --warp 0.35 --size 17 --outdir ./out_town</pre>
-<p>CSV columns: <code>id,pos_x,pos_y,pos_z,rot_y_deg,type,width_m,depth_m,height_m,scale,district,seed,warp</code></p>
+<aside>
+<h2>Warp tools (from the original)</h2>
+<div id="tools"></div>
+<h2>Brush</h2>
+<label>radius <input id="brush" type="range" min="10" max="220" value="90"><span id="brushval">90</span> m</label>
+<p style="color:var(--dim);font-size:12px">Drag on the map to warp. Wheel = brush size. <kbd>+</kbd>/<kbd>-</kbd> work too.</p>
+<h2>Town</h2>
+<div id="counts"></div>
+<h2>Pipeline files</h2>
+<p style="font-size:12px"><a href="out_town/buildings.csv">buildings.csv</a> · <a href="out_town/town.json">town.json</a> · <a href="out_town/preview.svg">preview.svg</a><br>
+<span style="color:var(--dim)">Same CSV columns as <code>city_gen.py</code>. Brush edits apply to every layer (walls, roads, river, buildings) like the original mesh warp.</span></p>
+</aside>
+<div id="stage"><canvas id="cv" width="860" height="860"></canvas><div id="hint">displace · drag to pull the mesh</div></div>
 </main>
+<script>
+// ---- seeded rng (xmur3 + mulberry32) ----
+function rng(seed){let h=1779033703^seed.length;for(let i=0;i<seed.length;i++){h=Math.imul(h^seed.charCodeAt(i),3432918353);h=h<<13|h>>>19}let a=h>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const TYPES=[
+ {name:'house_A_cottage',w:6,d:8,h:4.5,weight:30,color:'#c9a86a'},
+ {name:'house_B_row',w:5,d:10,h:5.5,weight:25,color:'#bf8f5a'},
+ {name:'house_C_merchant',w:8,d:10,h:6.5,weight:20,color:'#a87b4f'},
+ {name:'house_D_hall',w:10,d:14,h:7.5,weight:12,color:'#96704a'},
+ {name:'house_E_warehouse',w:12,d:16,h:8,weight:8,color:'#84643f'},
+ {name:'market',w:15,d:15,h:7,weight:0,color:'#5da05d'},
+ {name:'castle',w:25,d:30,h:14,weight:0,color:'#7a7f8a'}];
+const GAP=0.8,RCLEAR=1.0,RHALF=2.5;
+let town=null,base=null; // base = pre-brush copy for Reset
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+
+function genTown(seed,warp,size){
+ const R=size*6.5,rand=rng('town'+seed);
+ const f1=0.018+rand()*0.012,f2=0.045+rand()*0.02;
+ const P={f1,f2,p1:rand()*6.28,p2:rand()*6.28,p3:rand()*6.28,p4:rand()*6.28,p5:rand()*6.28};
+ const W=(x,z)=>{if(!warp)return[0,0];const a=warp*R*0.35;
+  return[a*(0.6*Math.sin(x*P.f1+P.p1)*Math.cos(z*P.f1+P.p2)+0.4*Math.sin((x+z)*P.f2+P.p3)),
+         a*(0.6*Math.cos(x*P.f1+P.p4)*Math.sin(z*P.f1+P.p1)+0.4*Math.cos((x-z)*P.f2+P.p5))]};
+ const wall=[];const w1=rand()*6.28,w2=rand()*6.28,N=48;
+ for(let i=0;i<N;i++){const a=2*Math.PI*i/N,rr=R*(1+0.05*Math.sin(3*a+w1)+0.03*Math.sin(5*a+w2));
+  const bx=Math.cos(a)*rr,bz=Math.sin(a)*rr,d=W(bx,bz);wall.push([bx+d[0],bz+d[1]])}
+ const ra=rand()*Math.PI,rw=9+rand()*3,rdx=Math.cos(ra),rdz=Math.sin(ra),rnx=-rdz,rnz=rdx;
+ const mph=rand()*6.28,mamp=12+warp*22,river=[];
+ for(let t=-14;t<=14;t++){const s=t*R/12,o=mamp*Math.sin(s*0.02+mph);
+  const bx=rdx*s+rnx*o,bz=rdz*s+rnz*o,d=W(bx,bz);river.push([bx+d[0],bz+d[1]])}
+ const dPoly=(x,z,pl)=>{let b=1e9,ba=0;for(const L of pl)for(let i=0;i<L.length-1;i++){
+  const ax=L[i][0],az=L[i][1],bx=L[i+1][0],bz=L[i+1][1];
+  const dx=bx-ax,dz=bz-az,l2=dx*dx+dz*dz||1;let t=((x-ax)*dx+(z-az)*dz)/l2;t=Math.max(0,Math.min(1,t));
+  const cx=ax+t*dx,cz=az+t*dz,d=Math.hypot(x-cx,z-cz);if(d<b){b=d;ba=Math.atan2(dz,dx)*180/Math.PI}}return[b,ba]};
+ const rDist=(x,z)=>dPoly(x,z,[river])[0];
+ let ca=rand()*2*Math.PI,cc=[Math.cos(ca)*R*0.32,Math.sin(ca)*R*0.32];
+ if(rDist(cc[0],cc[1])<rw/2+26)cc=[-cc[0],-cc[1]];
+ let mc=[0,0];
+ if(rDist(0,0)<rw/2+14)outer:for(let k=1;k<8;k++)for(const s of[1,-1]){
+  const c=[rnx*s*k*8,rnz*s*k*8];if(rDist(c[0],c[1])>rw/2+14){mc=c;break outer}}
+ const nR=7,radials=[],b0=rand()*2*Math.PI;
+ for(let i=0;i<nR;i++){const a=b0+2*Math.PI*i/nR+(rand()-0.5)*0.24,pts=[];
+  const ex=Math.cos(a)*R*1.02,ez=Math.sin(a)*R*1.02;
+  for(let s=0;s<=7;s++){const t=s/7;let bx=mc[0]+(ex-mc[0])*t,bz=mc[1]+(ez-mc[1])*t;
+   const wig=Math.sin(t*5+a*3)*(4+warp*8)*Math.sin(t*Math.PI);
+   bx+=-Math.sin(a)*wig;bz+=Math.cos(a)*wig;const d=W(bx,bz);pts.push([bx+d[0],bz+d[1]])}
+  radials.push(pts)}
+ const rings=[];for(const fr of[0.45,0.75]){const pts=[];
+  for(let i=0;i<N;i++){const a=2*Math.PI*i/N,bx=mc[0]+Math.cos(a)*R*fr,bz=mc[1]+Math.sin(a)*R*fr;
+   const d=W(bx,bz);pts.push([bx+d[0],bz+d[1]])}pts.push(pts[0].slice());rings.push(pts)}
+ const roads=[...radials,...rings];
+ const inPoly=(x,z)=>{let ins=false;for(let i=0;i<wall.length;i++){
+  const[x1,z1]=wall[i],[x2,z2]=wall[(i+1)%wall.length];
+  if((z1>z)!==(z2>z)&&x<(x2-x1)*(z-z1)/(z2-z1+1e-12)+x1)ins=!ins}return ins};
+ const corners=(cx,cz,w,d,r)=>{const a=r*Math.PI/180,c=Math.cos(a),s=Math.sin(a),hw=w/2,hd=d/2,o=[];
+  for(const[sx,sz]of[[1,1],[1,-1],[-1,-1],[-1,1]]){const lx=sx*hw,lz=sz*hd;o.push([cx+lx*c-lz*s,cz+lx*s+lz*c])}return o};
+ const overlap=(A,B)=>{for(const P of[A,B])for(let i=0;i<4;i++){
+  const nx=-(P[(i+1)%4][1]-P[i][1]),nz=P[(i+1)%4][0]-P[i][0],l=Math.hypot(nx,nz)||1,ux=nx/l,uz=nz/l;
+  const a=A.map(p=>p[0]*ux+p[1]*uz),b=B.map(p=>p[0]*ux+p[1]*uz);
+  if(Math.max(...a)<Math.min(...b)||Math.max(...b)<Math.min(...a))return false}return true};
+ const houses=TYPES.filter(t=>t.weight>0),placed=[],obbs=[];
+ function tryPlace(cx,cz,rot,spec,dist){
+  const w=spec.w,d=spec.d;if(!inPoly(cx,cz))return false;
+  let dm=1e9;for(let i=0;i<wall.length;i++){const ax=wall[i][0],az=wall[i][1],bx=wall[(i+1)%wall.length][0],bz=wall[(i+1)%wall.length][1];
+   const dx=bx-ax,dz=bz-az,l2=dx*dx+dz*dz||1;let t=((cx-ax)*dx+(cz-az)*dz)/l2;t=Math.max(0,Math.min(1,t));
+   dm=Math.min(dm,Math.hypot(cx-(ax+t*dx),cz-(az+t*dz)))}
+  if(dm<Math.max(w,d)/2+2.5)return false;
+  if(rDist(cx,cz)<rw/2+Math.max(w,d)/2+2)return false;
+  if(Math.hypot(cx-cc[0],cz-cc[1])<24+Math.max(w,d)/2+1.5)return false;
+  if(dPoly(cx,cz,roads)[0]<RHALF+RCLEAR+Math.min(w,d)/2*0.35)return false;
+  const c=corners(cx,cz,w+GAP,d+GAP,rot);
+  for(const o of obbs)if(overlap(c,o))return false;
+  for(const[qx,qz]of corners(cx,cz,w,d,rot)){
+   if(!inPoly(qx,qz)||rDist(qx,qz)<rw/2+1||Math.hypot(qx-cc[0],qz-cc[1])<24)return false}
+  placed.push({x:cx,z:cz,rot:((rot%360)+360)%360,type:spec.name,w,d,h:spec.h,district:dist});
+  obbs.push(c);return true}
+ const castle=TYPES.find(t=>t.name==='castle'),market=TYPES.find(t=>t.name==='market');
+ const am=Math.atan2(mc[1]-cc[1],mc[0]-cc[0])*180/Math.PI;
+ placed.push({x:cc[0],z:cc[1],rot:((-am%360)+360)%360,type:'castle',w:castle.w,d:castle.d,h:castle.h,district:'citadel'});
+ obbs.push(corners(cc[0],cc[1],castle.w+GAP,castle.d+GAP,-am));
+ const mr=rand()*90;placed.push({x:mc[0],z:mc[1],rot:mr,type:'market',w:market.w,d:market.d,h:market.h,district:'market'});
+ obbs.push(corners(mc[0],mc[1],market.w+GAP,market.d+GAP,mr));
+ // phase 1: street-front lots (tight rows, weighted types)
+ const segs=[];for(const L of roads)for(let i=0;i<L.length-1;i++)segs.push([L[i],L[i+1]]);
+ segs.sort(()=>rand()-0.5);
+ for(const[[ax,az],[bx,bz]]of segs){const sl=Math.hypot(bx-ax,bz-az);if(sl<1e-6)continue;
+  const sa=Math.atan2(bz-az,bx-ax)*180/Math.PI,nx=-(bz-az)/sl,nz=(bx-ax)/sl;let t=rand()*0.3;
+  while(true){t+=(3.5+rand()*3)/sl;if(t>=1)break;
+   const px=ax+(bx-ax)*t,pz=az+(bz-az)*t,rn=Math.hypot(px-mc[0],pz-mc[1])/R;
+   for(const side of[-1,1]){if(rand()<0.15)continue;
+    let pool=houses;if(rn<0.35)pool=houses.filter(s=>s.w*s.d>=48)||houses;
+    if(rn>0.7)pool=houses.filter(s=>s.w*s.d<=100)||houses;
+    const cw=pool.map(s=>s.weight),seen=new Set();
+    for(let k=0;k<3;k++){let r=rand()*cw.reduce((a,b)=>a+b,0),spec=pool[0];
+     for(let j=0;j<pool.length;j++){r-=cw[j];if(r<=0){spec=pool[j];break}}
+     if(seen.has(spec.name))continue;seen.add(spec.name);
+     const off=RHALF+RCLEAR+spec.d/2+rand();
+     const cx=px+nx*side*off+(rand()-0.5)*1.6,cz=pz+nz*side*off+(rand()-0.5)*1.6;
+     const rot=sa+(rand()<0.7?0:90)+(rand()-0.5)*8;
+     if(tryPlace(cx,cz,rot,spec,rn<0.35?'center':rn<0.7?'mid':'edge'))break}}}}
+ // phase 2: infill
+ for(let a=0;a<25000;a++){const xs=wall.map(p=>p[0]),zs=wall.map(p=>p[1]);
+  const cx=Math.min(...xs)+rand()*(Math.max(...xs)-Math.min(...xs));
+  const cz=Math.min(...zs)+rand()*(Math.max(...zs)-Math.min(...zs));
+  const rn=Math.hypot(cx-mc[0],cz-mc[1])/R;let pool=houses;
+  if(rn<0.35)pool=houses.filter(s=>s.w*s.d>=50);else if(rn>0.7)pool=houses.filter(s=>s.w*s.d<=100);
+  if(!pool.length)pool=houses;const cw=pool.map(s=>s.weight);
+  let r=rand()*cw.reduce((x,y)=>x+y,0),spec=pool[0];
+  for(let j=0;j<pool.length;j++){r-=cw[j];if(r<=0){spec=pool[j];break}}
+  const[dr,ra2]=dPoly(cx,cz,roads);
+  tryPlace(cx,cz,ra2+(rand()<0.5?90:0)+(rand()-0.5)*16,spec,rn<0.35?'center':rn<0.7?'mid':'edge')}
+ return{seed,warp,R,riverW:rw,citadel:{x:cc[0],z:cc[1],r:24},market:{x:mc[0],z:mc[1]},wall,roads,river,buildings:placed};
+}
+
+// ---- render ----
+let view={s:3,ox:0,oz:0};
+function fit(){const all=[...town.wall,...town.river,...town.buildings.flatMap(b=>[[b.x,b.z]])];
+ const xs=all.map(p=>p[0]),zs=all.map(p=>p[1]);
+ const x0=Math.min(...xs)-10,x1=Math.max(...xs)+10,z0=Math.min(...zs)-10,z1=Math.max(...zs)+10;
+ view.s=Math.min(cv.width/(x1-x0),cv.height/(z1-z0));view.ox=x0;view.oz=z0}
+const X=x=>(x-view.ox)*view.s,Z=z=>(z-view.oz)*view.s;
+function draw(brushPt){
+ ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle='#1a1d22';ctx.fillRect(0,0,cv.width,cv.height);
+ // river
+ ctx.strokeStyle='#4a7fb5';ctx.lineWidth=Math.max(2,town.riverW*view.s);ctx.lineCap='round';ctx.beginPath();
+ town.river.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
+ // walls
+ ctx.beginPath();town.wall.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));
+ ctx.closePath();ctx.fillStyle='#2a2e35';ctx.fill();ctx.strokeStyle='#8a8f98';ctx.lineWidth=2;ctx.stroke();
+ // roads
+ ctx.strokeStyle='#5a5148';ctx.lineWidth=2.5;
+ for(const L of town.roads){ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke()}
+ // citadel
+ ctx.beginPath();ctx.arc(X(town.citadel.x),Z(town.citadel.z),town.citadel.r*view.s,0,7);
+ ctx.fillStyle='#3a3f47';ctx.fill();ctx.strokeStyle='#9aa0ab';ctx.lineWidth=1.5;ctx.stroke();
+ // buildings
+ const col=Object.fromEntries(TYPES.map(t=>[t.name,t.color]));
+ for(const b of town.buildings){const a=b.rot*Math.PI/180,c=Math.cos(a),s=Math.sin(a),hw=b.w/2,hd=b.d/2;
+  ctx.beginPath();
+  [[1,1],[1,-1],[-1,-1],[-1,1],[1,1]].forEach(([sx,sz],i)=>{const lx=sx*hw,lz=sz*hd;
+   const px=X(b.x+lx*c-lz*s),pz=Z(b.z+lx*s+lz*c);i?ctx.lineTo(px,pz):ctx.moveTo(px,pz)});
+  ctx.fillStyle=col[b.type]||'#ccc';ctx.fill();ctx.strokeStyle='#222';ctx.lineWidth=1;ctx.stroke()}
+ // brush ring
+ if(brushPt){ctx.beginPath();ctx.arc(X(brushPt[0]),Z(brushPt[1]),+brushEl.value*view.s,0,7);
+  ctx.strokeStyle='#8ab4ff';ctx.setLineDash([6,4]);ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([])}
+ const n={};town.buildings.forEach(b=>n[b.type]=(n[b.type]||0)+1);
+ countsEl.innerHTML=town.buildings.length+' buildings<br>'+Object.entries(n).map(([k,v])=>k+': '+v).join('<br>');
+}
+
+// ---- warp brushes: same mesh-distortion idea as the original ----
+const TOOLS=[
+ ['displace','Displace','Pull the mesh (default warp brush)','D'],
+ ['liquify','Liquify','Softer smear, like Photoshop liquify','L'],
+ ['rotate','Rotate','Twist the map around the brush','R'],
+ ['bloat','Bloat','Push cells outward / inflate','B'],
+ ['relax','Relax','Smooth mesh, fix short edges','X'],
+ ['equalize','Equalize','Snap building angles to 15°','E'],
+ ['measure','Measure','Click two points for meters','M']];
+let tool='displace',drag=null,measurePts=[];
+const toolsEl=document.getElementById('tools'),hint=document.getElementById('hint'),
+ brushEl=document.getElementById('brush'),countsEl=document.getElementById('counts');
+TOOLS.forEach(([id,name,desc,key])=>{const b=document.createElement('button');
+ b.className='tool'+(id===tool?' on':'');b.innerHTML=name+'<kbd>'+key+'</kbd>';b.title=desc;
+ b.onclick=()=>{tool=id;document.querySelectorAll('.tool').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  hint.textContent=name.toLowerCase()+' · '+desc.toLowerCase()};toolsEl.appendChild(b)});
+function falloff(d,r,soft){if(d>=r)return 0;const t=1-d/r;return soft?t*t*(3-2*t)*t:0.5*(1+Math.cos(Math.PI*d/r))}
+function eachPtInBrush(cx,cz,fn){const r=+brushEl.value;
+ const touch=(p)=>{const d=Math.hypot(p[0]-cx,p[1]-cz);if(d<r)fn(p,d,r,null)};
+ town.wall.forEach(touch);town.roads.forEach(L=>L.forEach(touch));town.river.forEach(touch);
+ town.buildings.forEach(b=>{const d=Math.hypot(b.x-cx,b.z-cz);if(d<r){
+  const proxy=[[b.x,b.z]];
+  // expose as mutable point; write back after fn
+  const p=proxy[0];fn(p,d,r,b);b.x=p[0];b.z=p[1]}})}
+function applyBrush(x0,z0,x1,z1){
+ const r=+brushEl.value,cx=(x0+x1)/2,cz=(z0+z1)/2,dx=x1-x0,dz=z1-z0;
+ if(tool==='displace')eachPtInBrush(x0,z0,(p,d,rr)=>{const f=falloff(d,rr,false);p[0]+=dx*f;p[1]+=dz*f});
+ if(tool==='liquify')eachPtInBrush(x0,z0,(p,d,rr)=>{const f=falloff(d,rr,true)*1.4;
+  p[0]+=(dx*0.8+dz*0.25)*f;p[1]+=(dz*0.8-dx*0.25)*f});
+ if(tool==='bloat'){const amt=(Math.hypot(dx,dz)||2)*0.6*(((x1-cx)*dx+(z1-cz)*dz)>=0?1:-1)||2;
+  eachPtInBrush(cx,cz,(p,d,rr)=>{const f=falloff(d,rr,false),l=Math.hypot(p[0]-cx,p[1]-cz)||1;
+   p[0]+=(p[0]-cx)/l*amt*f;p[1]+=(p[1]-cz)/l*amt*f})}
+ if(tool==='rotate'){const ang=(dx-z0*0+dz)*0.01;
+  eachPtInBrush(cx,cz,(p,d,rr,b)=>{const f=falloff(d,rr,true);
+   const vx=p[0]-cx,vz=p[1]-cz,a=ang*f,c=Math.cos(a),s=Math.sin(a);
+   p[0]=cx+vx*c-vz*s;p[1]=cz+vx*s+vz*c;if(b)b.rot=(b.rot+ang*f*57.3)%360})}
+ if(tool==='relax')eachPtInBrush(cx,cz,(p,d,rr)=>{const f=falloff(d,rr,true)*0.25;
+  p[0]+=(cx-p[0])*f;p[1]+=(cz-p[1])*f});
+ if(tool==='equalize')town.buildings.forEach(b=>{
+  if(Math.hypot(b.x-cx,b.z-cz)<r)b.rot=Math.round(b.rot/15)*15});
+}
+const toWorld=e=>{const r=cv.getBoundingClientRect();
+ const sx=cv.width/r.width,sz=cv.height/r.height;
+ return[(e.clientX-r.left)*sx/view.s+view.ox,(e.clientY-r.top)*sz/view.s+view.oz]};
+let hov=null;
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);const[x,z]=toWorld(e);
+ if(tool==='measure'){measurePts.push([x,z]);
+  if(measurePts.length===2){const d=Math.hypot(measurePts[0][0]-measurePts[1][0],measurePts[0][1]-measurePts[1][1]);
+   hint.textContent='distance: '+d.toFixed(1)+' m';measurePts=[]}else hint.textContent='measure · click second point';return}
+ drag={x,z}});
+cv.addEventListener('pointermove',e=>{const[x,z]=toWorld(e);hov=[x,z];
+ if(drag){applyBrush(drag.x,drag.z,x,z);drag={x,z};draw(hov)}else draw(hov)});
+cv.addEventListener('pointerup',()=>drag=null);
+cv.addEventListener('wheel',e=>{e.preventDefault();
+ brushEl.value=Math.max(10,Math.min(220,+brushEl.value+(e.deltaY>0?-8:8)));
+ brushval.textContent=brushEl.value;draw(hov)},{passive:false});
+document.addEventListener('keydown',e=>{
+ const k=e.key.toLowerCase();
+ const map={d:'displace',l:'liquify',r:'rotate',b:'bloat',x:'relax',e:'equalize',m:'measure'};
+ if(map[k]){tool=map[k];document.querySelectorAll('.tool').forEach((x,i)=>x.classList.toggle('on',TOOLS[i][0]===tool));
+  hint.textContent=tool+' · drag to warp'}
+ if(e.key==='Enter')regen();if(e.key==='Escape')resetWarp();
+ if(e.key==='+'||e.key==='=')brushEl.value=Math.min(220,+brushEl.value+10);
+ if(e.key==='-')brushEl.value=Math.max(10,+brushEl.value-10);
+ brushval.textContent=brushEl.value;draw(hov)});
+
+// ---- controls ----
+const seedEl=document.getElementById('seed'),warpEl=document.getElementById('warp'),
+ sizeEl=document.getElementById('size'),brushval=document.getElementById('brushval');
+warpEl.oninput=()=>warpval.textContent=(+warpEl.value).toFixed(2);
+brushEl.oninput=()=>{brushval.textContent=brushEl.value;draw(hov)};
+function regen(){town=genTown(seedEl.value.trim(),+warpEl.value,+sizeEl.value||17);
+ base=JSON.parse(JSON.stringify(town));fit();draw()}
+function resetWarp(){if(base){town=JSON.parse(JSON.stringify(base));draw();
+ hint.textContent='warp discarded · back to generated mesh'}}
+document.getElementById('regen').onclick=regen;
+document.getElementById('reset').onclick=resetWarp;
+function download(name,text){const a=document.createElement('a');
+ a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));a.download=name;a.click()}
+document.getElementById('expcsv').onclick=()=>{
+ let s='id,pos_x,pos_y,pos_z,rot_y_deg,type,width_m,depth_m,height_m,scale,district,seed,warp\n';
+ town.buildings.forEach((b,i)=>{const rot=(((b.rot%360)+360)%360).toFixed(2);
+  s+=[i,b.x.toFixed(3),0,b.z.toFixed(3),rot,b.type,b.w,b.d,b.h,1,b.district,town.seed,town.warp].join(',')+'\n'});
+ download('buildings_seed'+town.seed+'.csv',s)};
+document.getElementById('expjson').onclick=()=>download('town_seed'+town.seed+'.json',JSON.stringify(town,null,1));
+regen();
+</script>
 </body>
 </html>

@@ -14,11 +14,10 @@
   "river_w": 9.35378167040049,
   "counts": {
     "castle": 1,
-    "house_A_cottage": 43,
-    "house_B_row": 47,
-    "house_C_merchant": 16,
+    "house_A_cottage": 85,
+    "house_B_row": 65,
+    "house_C_merchant": 31,
     "house_D_hall": 2,
-    "house_E_warehouse": 2,
     "market": 1
   }
 }

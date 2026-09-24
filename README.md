@@ -2,6 +2,25 @@
 
 Stdlib-only Python. No install. 1 unit = 1 meter, Y-up.
 
+## 0. Browser lab (warp UI, same system as the original)
+
+https://ibackstrom.github.io/city-pipeline/ — seed/warp/size inputs, canvas
+preview, warp brushes ported from the original toolset:
+
+| Tool | Key | Does |
+|------|-----|------|
+| Displace | D | pull mesh nodes (default warp brush) |
+| Liquify | L | softer smear |
+| Rotate | R | twist around brush center |
+| Bloat | B | inflate / push cells outward |
+| Relax | X | smooth mesh, fix short edges |
+| Equalize | E | snap building angles to 15° |
+| Measure | M | click two points → meters |
+
+Wheel or `+`/`-` = brush size. `Enter` = regenerate, `Esc` = discard warp.
+`Export CSV` downloads `buildings.csv` with the same columns as the Python
+output (warped state included) — straight into Houdini/PCG.
+
 ## 1. Generate (your Watabou preset)
 
 ```bash
@@ -21,13 +40,18 @@ Output in `outdir/`:
 - `buildings.csv` — scatter points (main). Columns:
   `id,pos_x,pos_y,pos_z,rot_y_deg,type,width_m,depth_m,height_m,scale,district,seed,warp`
 - `walls.csv, roads.csv, river.csv` — context lines
+- `town.json` — full geometry for the browser lab
 - `preview.svg` — open in browser for quick check
 - `manifest.json` — seed/warp echo + counts
+
+Placement is Watabou-style tight: street-front lots line both sides of every
+road (weighted types, district-biased), then block interiors are infilled —
+exact footprints, 0.8 m alleys, OBB overlap rejection.
 
 ## 2. Fit your actual house sizes
 
 Edit `buildings.json`. The generator places these **exact** footprints
-(no auto-rescale), with 1.5 m alleys, road/river/wall clearance, OBB overlap
+(no auto-rescale), with 0.8 m alleys, road/river/wall clearance, OBB overlap
 rejection, road-aligned rotation:
 
 ```json

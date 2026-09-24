@@ -208,18 +208,21 @@ def generate(seed, warp, R, lib):
         rings.append(pts)
 
     all_roads = radials + rings
-    ROAD_HALF = 3.0
+    ROAD_HALF = 2.5
 
     # ---- gates: where radials exit wall (just for info/export)
     gates = []
     for r in radials:
         gates.append(r[-1])
 
-    # ---- building placement (strict footprint fitting)
-    gap = lib.get('gap_m', 1.5)
-    road_clear = lib.get('road_clearance_m', 2.0)
+    # ---- building placement: Watabou-style tight lots facing streets
+    # Phase 1 = street-front lots (rows packed along every road, both sides).
+    # Phase 2 = random infill for block interiors. Strict footprints, no rescale.
+    gap = lib.get('gap_m', 0.8)
+    road_clear = lib.get('road_clearance_m', 1.0)
     house_types = [t for t in lib['types'] if t['weight'] > 0]
-    weights = [t['weight'] for t in house_types]
+    order_small = sorted(house_types, key=lambda t: (t['w'] * t['d']))
+    order_big = sorted(house_types, key=lambda t: -(t['w'] * t['d']))
     placed = []       # dicts
     placed_obbs = []  # inflated corner lists for overlap test
 
@@ -228,9 +231,6 @@ def generate(seed, warp, R, lib):
         # clearance checks
         if not point_in_poly(cx, cz, wall):
             return False
-        # inset from wall: test 4 corners inside shrunk check via dist to wall poly
-        # (cheap: distance to wall ring must be > min(w,d)/2 + 3)
-        dwall, _, _, _ = dist_pt_seg(cx, cz, wall[0][0], wall[0][1], wall[1][0], wall[1][1])
         # full ring distance
         dmin = 1e9
         for i in range(len(wall)):
@@ -238,14 +238,15 @@ def generate(seed, warp, R, lib):
             bx, bz = wall[(i + 1) % len(wall)]
             dd, _, _, _ = dist_pt_seg(cx, cz, ax, az, bx, bz)
             dmin = min(dmin, dd)
-        if dmin < max(w, d) / 2 + 4.0:
+        if dmin < max(w, d) / 2 + 2.5:
             return False
-        if river_dist(cx, cz) < river_w / 2 + max(w, d) / 2 + 3.0:
+        if river_dist(cx, cz) < river_w / 2 + max(w, d) / 2 + 2.0:
             return False
-        if math.hypot(cx - cit_c[0], cz - cit_c[1]) < cit_R + max(w, d) / 2 + 2.0:
+        if math.hypot(cx - cit_c[0], cz - cit_c[1]) < cit_R + max(w, d) / 2 + 1.5:
             return False
         droad, road_ang = dist_to_polylines(cx, cz, all_roads)
-        if droad < ROAD_HALF + road_clear + min(w, d) / 2 * 0.5:
+        # tight: keep off the carriageway but allow hugging the street
+        if droad < ROAD_HALF + road_clear + min(w, d) / 2 * 0.35:
             return False
         corners = obb_corners(cx, cz, w + gap, d + gap, rot)
         for oc in placed_obbs:
@@ -279,9 +280,55 @@ def generate(seed, warp, R, lib):
                                    market_spec['w'] + gap, market_spec['d'] + gap,
                                    placed[-1]['rot']))
 
-    # fill houses: sample + fit, big-to-small so large halls still find room
-    order = sorted(house_types, key=lambda t: -(t['w'] * t['d']))
-    max_attempts = 12000
+    # Phase 1: street-front lots — walk every road, drop lots on both sides,
+    # small houses first so rows pack tightly like Watabou lots.
+    street_segs = []
+    for line in all_roads:
+        for i in range(len(line) - 1):
+            street_segs.append((line[i], line[i + 1]))
+    rng.shuffle(street_segs)
+    for (ax, az), (bx, bz) in street_segs:
+        seg_len = math.hypot(bx - ax, bz - az)
+        if seg_len < 1e-6:
+            continue
+        seg_ang = math.degrees(math.atan2(bz - az, bx - ax))
+        nx, nz = -(bz - az) / seg_len, (bx - ax) / seg_len  # road normal
+        t = rng.uniform(0, 0.3)
+        while t < 1.0:
+            t += (3.5 + rng.random() * 3.0) / max(seg_len, 1e-6)
+            if t >= 1.0:
+                break
+            px, pz = ax + (bx - ax) * t, az + (bz - az) * t
+            for side in (-1, 1):
+                if rng.random() < 0.15:
+                    continue  # occasional gap: alley / courtyard / well
+                # weighted pick (district-filtered) so big houses still win rows
+                # near the center — try up to 3 candidates per lot
+                r_norm = math.hypot(px - market_c[0], pz - market_c[1]) / R
+                if r_norm < 0.35:
+                    cands = [s for s in house_types if s['w'] * s['d'] >= 48] or house_types
+                elif r_norm > 0.7:
+                    cands = [s for s in house_types if s['w'] * s['d'] <= 100] or house_types
+                else:
+                    cands = list(house_types)
+                cw = [s['weight'] for s in cands]
+                tried = set()
+                for _ in range(3):
+                    spec = rng.choices(cands, weights=cw, k=1)[0]
+                    if spec['name'] in tried:
+                        continue
+                    tried.add(spec['name'])
+                    off = ROAD_HALF + road_clear + spec['d'] / 2 + rng.uniform(0, 1.0)
+                    cx = px + nx * side * off + rng.uniform(-0.8, 0.8)
+                    cz = pz + nz * side * off + rng.uniform(-0.8, 0.8)
+                    # parallel or perpendicular to street, tiny jitter
+                    rot = seg_ang + (0 if rng.random() < 0.7 else 90) + rng.uniform(-4, 4)
+                    district = 'center' if r_norm < 0.35 else ('mid' if r_norm < 0.7 else 'edge')
+                    if try_place(cx, cz, rot, spec, district):
+                        break
+
+    # Phase 2: infill block interiors, big-to-small so halls still find room
+    max_attempts = 25000
     attempts = 0
     # target counts roughly proportional to weight but limited by space
     while attempts < max_attempts:
@@ -293,16 +340,16 @@ def generate(seed, warp, R, lib):
         r_norm = math.hypot(cx - market_c[0], cz - market_c[1]) / R
         # district + size bias: center prefers big, edge prefers small
         if r_norm < 0.35:
-            pool = [t for t in order if t['w'] * t['d'] >= 50]
+            pool = [t for t in order_big if t['w'] * t['d'] >= 50]
             district = 'center'
         elif r_norm < 0.7:
-            pool = order
+            pool = order_big
             district = 'mid'
         else:
-            pool = [t for t in order if t['w'] * t['d'] <= 100]
+            pool = [t for t in order_big if t['w'] * t['d'] <= 100]
             district = 'edge'
         if not pool:
-            pool = order
+            pool = order_big
         # weighted pick inside pool
         pw = [t['weight'] for t in pool]
         spec = rng.choices(pool, weights=pw, k=1)[0]
@@ -327,7 +374,7 @@ def generate(seed, warp, R, lib):
 
 # ---------------------------------------------------------------- export
 
-def write_csvs(outdir, placed, wall, roads, river, gates, meta, seed, warp):
+def write_csvs(outdir, placed, wall, roads, river, gates, meta, seed, warp, lib=None, R=None):
     os.makedirs(outdir, exist_ok=True)
     bp = os.path.join(outdir, 'buildings.csv')
     with open(bp, 'w', newline='') as f:
@@ -358,6 +405,21 @@ def write_csvs(outdir, placed, wall, roads, river, gates, meta, seed, warp):
             w.writerow([j, round(x, 3), round(z, 3), round(meta['river_w'], 2)])
     with open(os.path.join(outdir, 'manifest.json'), 'w') as f:
         json.dump(meta, f, indent=2)
+    # town.json: full geometry for the browser warp UI (same system as Python)
+    with open(os.path.join(outdir, 'town.json'), 'w') as f:
+        json.dump({
+            'seed': seed, 'warp': warp, 'R': R, 'meta': meta,
+            'wall': [[round(x, 3), round(z, 3)] for x, z in wall],
+            'roads': [[[round(x, 3), round(z, 3)] for x, z in line] for line in roads],
+            'river': [[round(x, 3), round(z, 3)] for x, z in river],
+            'buildings': [
+                {'x': round(p['x'], 3), 'z': round(p['z'], 3),
+                 'rot': round(p['rot'] % 360, 2), 'type': p['spec']['name'],
+                 'w': p['spec']['w'], 'd': p['spec']['d'],
+                 'h': p['spec'].get('h', 5.0), 'district': p['district']}
+                for p in placed
+            ],
+        }, f)
     return bp
 
 
@@ -425,7 +487,7 @@ def main():
         lib = json.load(f)
 
     placed, wall, roads, river, river_w, gates, meta = generate(a.seed, warp, R, lib)
-    bp = write_csvs(a.outdir, placed, wall, roads, river, gates, meta, a.seed, warp)
+    bp = write_csvs(a.outdir, placed, wall, roads, river, gates, meta, a.seed, warp, lib, R)
     if not a.no_preview:
         write_preview(a.outdir, placed, wall, roads, river, river_w, meta, lib)
     print(f'seed={a.seed} warp={warp} R={R:.1f}m -> {len(placed)} buildings')
