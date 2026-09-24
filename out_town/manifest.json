@@ -15,12 +15,13 @@
   "mesh_spacing": 18.416666666666668,
   "counts": {
     "castle": 1,
-    "house_A_cottage": 62,
-    "house_B_row": 23,
-    "house_C_merchant": 9,
-    "house_D_hall": 1,
+    "house_A_cottage": 52,
+    "house_B_row": 35,
+    "house_C_merchant": 11,
+    "house_D_hall": 3,
+    "house_E_warehouse": 1,
     "market": 1
   },
   "blocks": 33,
-  "lots": 94
+  "lots": 102
 }

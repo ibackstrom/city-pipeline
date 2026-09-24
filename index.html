@@ -3,54 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>city-pipeline — town lab (blocks + mesh warp)</title>
+<title>small town — seed + warp lab</title>
 <style>
-:root{--bg:#111418;--panel:#1a1e24;--line:#2c323b;--txt:#e8e8e8;--dim:#9aa3af;--acc:#8ab4ff}
-*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--txt);margin:0}
-header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
-header h1{font-size:16px;margin:0 8px 0 0}label{font-size:12px;color:var(--dim);display:flex;gap:6px;align-items:center}
-input[type=number]{width:110px;background:#22262d;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
-input[type=range]{width:120px}button{background:#2a313b;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px}
-button:hover{border-color:var(--acc)}button.on{background:#31405c;border-color:var(--acc)}
-main{display:grid;grid-template-columns:252px 1fr;min-height:calc(100vh - 57px)}
-aside{border-right:1px solid var(--line);padding:14px;background:var(--panel);font-size:13px}
-aside h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:14px 0 8px}
-.tool{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-bottom:6px}
-.tool kbd{margin-left:auto;background:#22262d;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:11px;color:var(--dim)}
-#stage{position:relative;display:flex;align-items:center;justify-content:center;padding:12px}
-canvas{background:#1a1d22;border:1px solid var(--line);border-radius:8px;max-width:100%;cursor:crosshair;touch-action:none}
-#hint{position:absolute;left:24px;bottom:20px;background:rgba(0,0,0,.65);padding:6px 10px;border-radius:6px;font-size:12px;color:var(--dim)}
-#counts{font-size:12px;color:var(--dim);line-height:1.7}
-a{color:var(--acc)}code{background:#22262d;padding:1px 5px;border-radius:4px}
+/* original DEFAULT palette: paper #ccc5b8, light #99948a, medium #67635c, dark #1a1917 */
+:root{--paper:#ccc5b8;--light:#99948a;--medium:#67635c;--dark:#1a1917}
+*{box-sizing:border-box}body{font-family:Georgia,'Times New Roman',serif;background:var(--paper);color:var(--dark);margin:0}
+#top{position:fixed;top:10px;left:10px;z-index:5;font-size:13px;background:rgba(204,197,184,.92);
+ border:1px solid var(--medium);padding:8px 10px;max-width:250px}
+#top .row{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+#top input[type=number]{width:100px;font-family:inherit;background:var(--paper);color:var(--dark);border:1px solid var(--medium);padding:3px 6px}
+#top input[type=range]{width:110px}
+#sizes{position:fixed;top:10px;right:10px;z-index:5;display:flex;flex-direction:column;gap:1px}
+#sizes button{font-family:inherit;font-size:12px;background:var(--paper);color:var(--dark);border:1px solid var(--medium);padding:4px 10px;cursor:default;text-align:left}
+#sizes button.locked{background:var(--medium);color:var(--paper)}
+#warpbar{position:fixed;top:10px;right:10px;z-index:6;display:none;flex-direction:column;gap:1px;background:rgba(204,197,184,.95);border:1px solid var(--medium);padding:6px}
+#warpbar button{font-family:inherit;font-size:12px;background:var(--paper);color:var(--dark);border:1px solid var(--medium);padding:4px 10px;cursor:pointer;text-align:left}
+#warpbar button.on{background:var(--dark);color:var(--paper)}
+#warpbar button kbd{float:right;margin-left:12px;opacity:.6}
+#stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+canvas{background:var(--paper);cursor:crosshair;touch-action:none}
+#hint{position:fixed;left:10px;bottom:8px;z-index:5;font-size:12px;font-style:italic;opacity:.75}
+#menu{position:fixed;left:10px;bottom:28px;z-index:6;display:none;flex-direction:column;background:rgba(204,197,184,.97);border:1px solid var(--dark);min-width:210px}
+#menu button{font-family:inherit;font-size:13px;background:none;border:none;color:var(--dark);padding:7px 12px;cursor:pointer;text-align:left}
+#menu button:hover{background:var(--dark);color:var(--paper)}
+a{color:var(--dark)}
 </style>
 </head>
 <body>
-<header>
-<h1>town lab</h1>
-<label>seed <input id="seed" type="number" value="1555148727"></label>
-<label>warp <input id="warp" type="range" min="0" max="1" step="0.01" value="0.35"><span id="warpval">0.35</span></label>
-<label>size <input id="size" type="number" value="17" min="5" max="40"></label>
-<button id="regen">Regenerate (Enter)</button>
-<button id="reset">Reset warp (Esc)</button>
-<button id="expcsv">Export CSV → Houdini/PCG</button>
-<button id="expjson">Export JSON</button>
-</header>
-<main>
-<aside>
-<h2>Warp tools (original set)</h2>
-<div id="tools"></div>
-<h2>Brush</h2>
-<label>radius <input id="brush" type="range" min="10" max="220" value="90"><span id="brushval">90</span> m</label>
-<label><input id="showmesh" type="checkbox"> show warp mesh</label>
-<p style="color:var(--dim);font-size:12px">Drag on the map — brushes move <b>mesh nodes</b>, every layer (walls, roads, river, blocks, buildings) follows, exactly like the original warp mode. Wheel = brush size.</p>
-<h2>Town</h2>
-<div id="counts"></div>
-<h2>Pipeline</h2>
-<p style="font-size:12px"><a href="out_town/buildings.csv">buildings.csv</a> · <a href="out_town/blocks.csv">blocks.csv</a> · <a href="out_town/mesh.csv">mesh.csv</a> · <a href="out_town/town.json">town.json</a><br>
-<span style="color:var(--dim)">Blocks → lots → inscribed footprints (perimeter blocks). Same mesh system in <code>city_gen.py</code>; the lab mirrors it in JS (RNG differs, layout language identical).</span></p>
-</aside>
-<div id="stage"><canvas id="cv" width="860" height="860"></canvas><div id="hint">displace · drag to pull mesh nodes</div></div>
-</main>
+<div id="top">
+<div class="row"><b>seed</b><input id="seed" type="number" value="1555148727">
+<button id="regen" title="Enter">new town</button></div>
+<div class="row"><b>warp</b><input id="warp" type="range" min="0" max="1" step="0.01" value="0.35"><span id="warpval">0.35</span></div>
+<div class="row" id="counts" style="font-size:12px;font-style:italic"></div>
+</div>
+<div id="sizes"><button class="locked">Small Town · 17</button></div>
+<div id="warpbar"><div id="tools"></div>
+<div style="font-size:12px;padding:2px 10px">brush <input id="brush" type="range" min="10" max="220" value="90" style="width:90px"> <span id="brushval">90</span></div>
+</div>
+<div id="stage"><canvas id="cv" width="860" height="860"></canvas></div>
+<div id="hint">right-click: menu · Enter: new town</div>
+<div id="menu"></div>
 <script>
 // ---- seeded rng ----
 function RNG(seed){let h=1779033703^seed.length;for(let i=0;i<seed.length;i++){h=Math.imul(h^seed.charCodeAt(i),3432918353);h=h<<13|h>>>19}let a=h>>>0;
@@ -167,7 +159,8 @@ function genTown(seed,warp,size){
    const cx=(q[0][0]+q[1][0]+q[2][0]+q[3][0])/4,cz=(q[0][1]+q[1][1]+q[2][1]+q[3][1])/4;
    if(rDist(cx,cz)<rw/2+4||Math.hypot(cx-cc[0],cz-cc[1])<26)continue;
    blocks.push(...split(q,0))}}
- // lots -> inscribed footprints (perimeter blocks)
+ // lots: original Ward.createAlleys — inset block, recursive longest-edge
+ // bisect (alley gap 0.6), inscribe one footprint per leaf lot
  const houses=TYPES.filter(t=>t.weight>0),placed=[];
  const corners=(cx,cz,w,d,r)=>{const a=r*Math.PI/180,c=Math.cos(a),s=Math.sin(a),hw=w/2,hd=d/2,o=[];
   for(const[sx,sz]of[[1,1],[1,-1],[-1,-1],[-1,1]]){const lx=sx*hw,lz=sz*hd;o.push([cx+lx*c-lz*s,cz+lx*s+lz*c])}return o};
@@ -179,32 +172,80 @@ function genTown(seed,warp,size){
  function tryPlace(cx,cz,rot,spec,dist){const w=spec.w,d=spec.d;
   if(!clear(cx,cz))return false;
   for(const[qx,qz]of corners(cx,cz,w,d,rot))if(!clear(qx,qz))return false;
-  for(const[[ax,az],[bx,bz]]of alleys){const dx=bx-ax,dz=bz-az,l2=dx*dx+dz*dz||1;
-   let t=((cx-ax)*dx+(cz-az)*dz)/l2;t=Math.max(0,Math.min(1,t));
-   if(Math.hypot(cx-(ax+t*dx),cz-(az+t*dz))<Math.max(w,d)/2+ALLEY)return false}
   const c=corners(cx,cz,w+GAP,d+GAP,rot);
   for(const p of placed)if(overlap(c,corners(p.x,p.z,p.w+GAP,p.d+GAP,p.rot)))return false;
   placed.push({x:cx,z:cz,rot,type:spec.name,w:w,d:d,h:spec.h,district:dist});return true}
- blocks.forEach((blk,bi)=>{if(blk.length<3)return;
+ const polyArea=p=>Math.abs(p.reduce((s,q,i)=>s+q[0]*p[(i+1)%p.length][1]-p[(i+1)%p.length][0]*q[1],0))/2;
+ function shrink(poly,d){const n=poly.length,cx=poly.reduce((s,p)=>s+p[0],0)/n,cz=poly.reduce((s,p)=>s+p[1],0)/n;
+  const off=poly.map((P,i)=>{const Q=poly[(i+1)%n];let ex=Q[0]-P[0],ez=Q[1]-P[1];const el=Math.hypot(ex,ez)||1;
+   let nx=-ez/el,nz=ex/el;const mx=(P[0]+Q[0])/2,my=(P[1]+Q[1])/2;
+   if((cx-mx)*nx+(cz-my)*nz<0){nx=-nx;nz=-nz}return{P,Q,nx,nz}});
+  return off.map((o,i)=>{const p2=off[(i+1)%n];
+   const e1x=o.Q[0]-o.P[0],e1z=o.Q[1]-o.P[1],e2x=p2.Q[0]-p2.P[0],e2z=p2.Q[1]-p2.P[1];
+   const a1x=o.P[0]+o.nx*d,a1z=o.P[1]+o.nz*d,a2x=p2.P[0]+p2.nx*d,a2z=p2.P[1]+p2.nz*d;
+   const den=e1x*e2z-e1z*e2x;
+   if(Math.abs(den)<1e-9)return[a1x+e1x*0.5,a1z+e1z*0.5];
+   const t=((a2x-a1x)*e2z-(a2z-a1z)*e2x)/den;return[a1x+e1x*t,a1z+e1z*t]})}
+ function splitPoly(poly,t,jang,gap){const n=poly.length;
+  let best=0,bl=-1;for(let i=0;i<n;i++){const l=Math.hypot(poly[(i+1)%n][0]-poly[i][0],poly[(i+1)%n][1]-poly[i][1]);
+   if(l>bl){bl=l;best=i}}
+  const P0=poly[best],P1=poly[(best+1)%n];
+  const A=[P0[0]+(P1[0]-P0[0])*t,P0[1]+(P1[1]-P0[1])*t];
+  let ccx=poly.reduce((s,p)=>s+p[0],0)/n-A[0],ccz=poly.reduce((s,p)=>s+p[1],0)/n-A[1];
+  const cl=Math.hypot(ccx,ccz)||1,ca=Math.cos(jang),sa=Math.sin(jang);
+  let dx=(ccx/cl)*ca-(ccz/cl)*sa,dz=(ccx/cl)*sa+(ccz/cl)*ca;
+  const scored=[];
+  for(let i=0;i<n;i++){if(i===best)continue;const Q0=poly[i],Q1=poly[(i+1)%n];
+   scored.push([((Q0[0]+Q1[0])/2-A[0])*dx+((Q0[1]+Q1[1])/2-A[1])*dz,i])}
+  scored.sort((a,b)=>b[0]-a[0]);let B=null,e1=-1;
+  for(const[,i]of scored){const Q0=poly[i],Q1=poly[(i+1)%n];
+   const ex2=Q1[0]-Q0[0],ez2=Q1[1]-Q0[1],den=dx*ez2-dz*ex2;
+   if(Math.abs(den)<1e-12)continue;
+   const v=((Q0[0]-A[0])*dz-(Q0[1]-A[1])*dx)/den;
+   if(v>=0.02&&v<=0.98){B=[Q0[0]+ex2*v,Q0[1]+ez2*v];e1=i;break}}
+  if(!B)return null;
+  const ch1=[A];{let k=best;while(true){ch1.push(poly[(k+1)%n]);if(k===e1)break;k=(k+1)%n}ch1.push(B)}
+  const ch2=[B];{let k=e1;while(true){ch2.push(poly[(k+1)%n]);if(k===best)break;k=(k+1)%n}ch2.push(A)}
+  const g=gap/2,c1=[A[0]+dx*g,A[1]+dz*g],c2=[A[0]-dx*g,A[1]-dz*g];
+  const d1=[B[0]+dx*g,B[1]+dz*g],d2=[B[0]-dx*g,B[1]-dz*g];
+  const r1=[c1,...ch1.slice(1,-1),d1],r2=[d2,...ch2.slice(1,-1),c2];
+  if(Math.min(polyArea(r1),polyArea(r2))<polyArea(poly)*0.15)return null;
+  alleys.push([A,B]);return[r1,r2]}
+ function createAlleys(poly){const spread=0.8*0.7;
+  for(let a=0;a<5;a++){const ratio=(1-spread)/2+rng.next()*spread;
+   const asp=Math.PI/6*0.7*(polyArea(poly)<42*4?0:1),b=(rng.next()-0.5)*asp;
+   const res=splitPoly(poly,ratio,b,0.6);
+   if(res){const out=[];
+    for(const half of res){
+     if(half.length<3||polyArea(half)<42*Math.pow(2,4*0.5*(rng.next()-0.5))){
+      if(rng.next()>=0.04)out.push(half)}else out.push(...createAlleys(half))}
+    return out}}
+  return[poly]}
+ function lotFrame(lot){const n=lot.length;
+  let best=0,bl=-1;for(let i=0;i<n;i++){const l=Math.hypot(lot[(i+1)%n][0]-lot[i][0],lot[(i+1)%n][1]-lot[i][1]);
+   if(l>bl){bl=l;best=i}}
+  const P0=lot[best],P1=lot[(best+1)%n],ang=Math.atan2(P1[1]-P0[1],P1[0]-P0[0])*180/Math.PI;
+  const r=ang*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
+  const xs=lot.map(p=>p[0]*c+p[1]*s),zs=lot.map(p=>-p[0]*s+p[1]*c);
+  const x0=Math.min(...xs),x1=Math.max(...xs),z0=Math.min(...zs),z1=Math.max(...zs);
+  return{w:x1-x0,h:z1-z0,ang,cx:(x0+x1)/2,cz:(z0+z1)/2,c,s}}
+ blocks.forEach((blk)=>{if(blk.length<3)return;
   const cx=blk.reduce((s,p)=>s+p[0],0)/blk.length,cz=blk.reduce((s,p)=>s+p[1],0)/blk.length;
   const rn=Math.hypot(cx-mc[0],cz-mc[1])/R,dist=rn<0.35?'center':rn<0.7?'mid':'edge';
-  for(let e=0;e<blk.length;e++){const P=blk[e],Q=blk[(e+1)%blk.length];
-   const el=Math.hypot(Q[0]-P[0],Q[1]-P[1]);if(el<7)continue;
-   const ex=(Q[0]-P[0])/el,ez=(Q[1]-P[1])/el;
-   let ix=cx-(P[0]+Q[0])/2,iz=cz-(P[1]+Q[1])/2;const il=Math.hypot(ix,iz)||1;ix/=il;iz/=il;
-   let s=RHALF+SETBACK+2+rng.next();const end=el-(RHALF+SETBACK+2);
-   while(s<end){const front=dist==='center'?8+rng.next()*4:6.5+rng.next()*3.5;
-    const depth=dist==='center'?10+rng.next()*5:9.5+rng.next()*3;
-    if(s+front>end)break;const sm=s+front/2,lx=P[0]+ex*sm,lz=P[1]+ez*sm;
-    let cands=houses.filter(t=>t.w<=front-0.4&&t.d<=depth-0.4);
-    if(rn>0.7)cands=cands.filter(t=>t.w*t.d<=100);if(rn<0.35)cands=cands.filter(t=>t.w*t.d>=48);
-    if(!cands.length)cands=houses.filter(t=>t.w<=front-0.4&&t.d<=depth-0.4);
-    if(cands.length&&rng.next()>0.12){const cw=cands.map(t=>t.weight),seen=new Set(),order=[];
-     for(let k=0;k<3;k++){const sp=rng.pickW(cands,cw);if(!seen.has(sp.name)){seen.add(sp.name);order.push(sp)}}
-     order.push(...[...cands].sort((a,b)=>a.w*a.d-b.w*b.d));
-     for(const spec of order){const off=RHALF+SETBACK+spec.d/2;
-      if(tryPlace(lx+ix*off,lz+iz*off,Math.atan2(ez,ex)*180/Math.PI,spec,dist))break}}
-    s+=front+GAP}}});
+  const inner=shrink(blk,0.8);
+  if(inner.length<3||polyArea(inner)<10)return;
+  for(const lot of createAlleys(inner)){if(lot.length<3)continue;
+   const F=lotFrame(lot),qx=F.cx*F.c-F.cz*F.s,qz=F.cx*F.s+F.cz*F.c;
+   let cands=houses.filter(t=>t.w<=F.w-0.4&&t.d<=F.h-0.4),rotated=false;
+   if(!cands.length){cands=houses.filter(t=>t.d<=F.w-0.4&&t.w<=F.h-0.4);rotated=true}
+   if(rn>0.7)cands=cands.filter(t=>t.w*t.d<=100);
+   if(rn<0.35)cands=cands.filter(t=>t.w*t.d>=48);
+   if(!cands.length)continue;
+   const cw=cands.map(t=>t.weight),seen=new Set(),order=[];
+   for(let k=0;k<3;k++){const sp=rng.pickW(cands,cw);if(!seen.has(sp.name)){seen.add(sp.name);order.push(sp)}}
+   order.push(...[...cands].sort((a,b)=>a.w*a.d-b.w*b.d));
+   for(const spec of order)
+    if(tryPlace(qx,qz,F.ang+(rotated?90:0),spec,dist))break}});
  for(const big of['house_D_hall','house_E_warehouse']){const spec=houses.find(t=>t.name===big);
   if(!spec)continue;
   for(let k=0;k<300;k++){const a=rng.next()*2*Math.PI,rr=R*rng.uniform(0.22,0.38);
@@ -237,110 +278,137 @@ function fit(V){const all=[...V.wall,...V.river,...V.buildings.map(b=>[b.x,b.z])
  view.s=Math.min(cv.width/(x1-x0),cv.height/(z1-z0));view.ox=x0;view.oz=z0}
 const X=x=>(x-view.ox)*view.s,Z=z=>(z-view.oz)*view.s;
 const countsEl=document.getElementById('counts'),hint=document.getElementById('hint'),
- brushEl=document.getElementById('brush'),brushval=document.getElementById('brushval'),
- showmesh=document.getElementById('showmesh');
+ brushEl=document.getElementById('brush'),brushval=document.getElementById('brushval');
+// original DEFAULT palette
+const PAPER='#ccc5b8',LIGHT='#99948a',MEDIUM='#67635c',DARK='#1a1917';
+function strokePoly(pts,close){ctx.beginPath();
+ pts.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));
+ if(close)ctx.closePath();ctx.stroke()}
 function draw(V,brushPt){
- ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle='#1a1d22';ctx.fillRect(0,0,cv.width,cv.height);
- ctx.strokeStyle='#4a7fb5';ctx.lineWidth=Math.max(2,T.riverW*view.s);ctx.lineCap='round';ctx.beginPath();
- V.river.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
- ctx.beginPath();V.wall.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));
- ctx.closePath();ctx.fillStyle='#2a2e35';ctx.fill();ctx.strokeStyle='#8a8f98';ctx.lineWidth=2;ctx.stroke();
- ctx.strokeStyle='#6b7280';ctx.lineWidth=0.7;
- for(const b of V.blocks){ctx.beginPath();b.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));
-  ctx.closePath();ctx.stroke()}
- ctx.strokeStyle='#5a5148';ctx.lineWidth=2.5;
- for(const L of[...V.roads,...V.alleys]){ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke()}
- ctx.beginPath();ctx.arc(X(V.citadel.x),Z(V.citadel.z),V.citadel.r*view.s,0,7);
- ctx.fillStyle='#3a3f47';ctx.fill();ctx.strokeStyle='#9aa0ab';ctx.lineWidth=1.5;ctx.stroke();
- const col=Object.fromEntries(TYPES.map(t=>[t.name,t.color]));
+ // paper
+ ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle=PAPER;ctx.fillRect(0,0,cv.width,cv.height);
+ // river: medium casing + paper core (old build has no waterbodies pass)
+ ctx.lineCap='round';ctx.strokeStyle=MEDIUM;ctx.lineWidth=Math.max(3,T.riverW*view.s);
+ ctx.beginPath();V.river.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
+ ctx.strokeStyle=PAPER;ctx.lineWidth=Math.max(1,T.riverW*view.s-3);
+ ctx.beginPath();V.river.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
+ // city wall: dark thick + towers
+ ctx.strokeStyle=DARK;ctx.lineWidth=5;strokePoly([...V.wall,V.wall[0]]);
+ ctx.fillStyle=DARK;
+ V.wall.filter((_,i)=>i%4===0).forEach(p=>{ctx.beginPath();ctx.arc(X(p[0]),Z(p[1]),3.5,0,7);ctx.fill()});
+ // roads: medium casing + paper core (MAIN_STREET vs alley widths)
+ for(const L of V.roads){ctx.strokeStyle=MEDIUM;ctx.lineWidth=4.6;
+  ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
+  ctx.strokeStyle=PAPER;ctx.lineWidth=3;
+  ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke()}
+ for(const L of V.alleys){ctx.strokeStyle=MEDIUM;ctx.lineWidth=2;
+  ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke()}
+ // citadel wall
+ ctx.strokeStyle=DARK;ctx.lineWidth=4;
+ ctx.beginPath();ctx.arc(X(V.citadel.x),Z(V.citadel.z),V.citadel.r*view.s,0,7);ctx.stroke();
+ // buildings: light fill, dark thin stroke — one style for all wards
  for(const b of V.buildings){const a=b.rot*Math.PI/180,c=Math.cos(a),s=Math.sin(a),hw=b.w/2,hd=b.d/2;
   ctx.beginPath();
   [[1,1],[1,-1],[-1,-1],[-1,1],[1,1]].forEach(([sx,sz],i)=>{const lx=sx*hw,lz=sz*hd;
    const px=X(b.x+lx*c-lz*s),pz=Z(b.z+lx*s+lz*c);i?ctx.lineTo(px,pz):ctx.moveTo(px,pz)});
-  ctx.fillStyle=col[b.type]||'#ccc';ctx.fill();ctx.strokeStyle='#222';ctx.lineWidth=1;ctx.stroke()}
- if(showmesh.checked){ctx.strokeStyle='rgba(138,180,255,.35)';ctx.lineWidth=1;
+  ctx.fillStyle=LIGHT;ctx.fill();ctx.strokeStyle=DARK;ctx.lineWidth=0.8;ctx.stroke()}
+ // warp mesh lives only in warp mode (like the original)
+ if(mode==='warp'){ctx.strokeStyle='rgba(26,25,23,.4)';ctx.lineWidth=1;
   const M=T.mesh;
   for(let j=0;j<M.nz;j++){ctx.beginPath();for(let i=0;i<M.nx;i++){const k=j*M.nx+i;
    const q=M.ev(M.base[k][0],M.base[k][1]);i?ctx.lineTo(X(q[0]),Z(q[1])):ctx.moveTo(X(q[0]),Z(q[1]))}ctx.stroke()}
   for(let i=0;i<M.nx;i++){ctx.beginPath();for(let j=0;j<M.nz;j++){const k=j*M.nx+i;
    const q=M.ev(M.base[k][0],M.base[k][1]);j?ctx.lineTo(X(q[0]),Z(q[1])):ctx.moveTo(X(q[0]),Z(q[1]))}ctx.stroke()}}
- if(brushPt){ctx.beginPath();ctx.arc(X(brushPt[0]),Z(brushPt[1]),+brushEl.value*view.s,0,7);
-  ctx.strokeStyle='#8ab4ff';ctx.setLineDash([6,4]);ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([])}
- const n={};V.buildings.forEach(b=>n[b.type]=(n[b.type]||0)+1);
- countsEl.innerHTML=V.buildings.length+' buildings · '+T.blocks.length+' blocks<br>'+
-  Object.entries(n).map(([k,v])=>k+': '+v).join('<br>');
+ if(mode==='warp'&&brushPt){ctx.beginPath();ctx.arc(X(brushPt[0]),Z(brushPt[1]),+brushEl.value*view.s,0,7);
+  ctx.strokeStyle=DARK;ctx.setLineDash([6,4]);ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([])}
+ countsEl.textContent=V.buildings.length+' buildings · seed '+T.seed;
  return V;
 }
 
-// ---- tools on mesh nodes ----
+// ---- modes + tools (original UX: map mode, warp mode via menu) ----
+let mode='map'; // 'map' | 'warp'
 const TOOLS=[
- ['displace','Displace','Pull mesh nodes (default warp brush)','D'],
- ['liquify','Liquify','Softer smear, like Photoshop liquify','L'],
- ['rotate','Rotate','Twist the mesh around the brush','R'],
- ['bloat','Bloat','Push cells outward / inflate','B'],
- ['relax','Relax','Smooth the mesh, fix short edges','X'],
- ['equalize','Equalize','Snap building angles to 15°','E'],
- ['measure','Measure','Click two points for meters','M']];
+ ['displace','Displace','drag to pull the mesh','D'],
+ ['liquify','Liquify','softer smear','L'],
+ ['rotate','Rotate','twist around the brush','R'],
+ ['bloat','Bloat','inflate cells','B'],
+ ['relax','Relax','smooth the mesh','X'],
+ ['equalize','Equalize','snap building angles','E'],
+ ['measure','Measure','click two points','M']];
 let tool='displace',drag=null,measurePts=[],V=null;
-const toolsEl=document.getElementById('tools');
+const toolsEl=document.getElementById('tools'),warpbar=document.getElementById('warpbar'),
+ menu=document.getElementById('menu');
 TOOLS.forEach(([id,name,desc,key])=>{const b=document.createElement('button');
- b.className='tool'+(id===tool?' on':'');b.innerHTML=name+'<kbd>'+key+'</kbd>';b.title=desc;
- b.onclick=()=>{tool=id;document.querySelectorAll('.tool').forEach(x=>x.classList.remove('on'));b.classList.add('on');
-  hint.textContent=name.toLowerCase()+' · '+desc.toLowerCase()};toolsEl.appendChild(b)});
+ b.className=id===tool?'on':'';b.innerHTML=name+'<kbd>'+key+'</kbd>';b.title=desc;
+ b.onclick=()=>{tool=id;[...toolsEl.children].forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  hint.textContent=name.toLowerCase()+' · '+desc};toolsEl.appendChild(b)});
+function setMode(m){mode=m;measurePts=[];
+ warpbar.style.display=m==='warp'?'flex':'none';
+ hint.textContent=m==='warp'?'displace · drag to pull the mesh nodes':'right-click: menu · Enter: new town';
+ if(V)draw(V,hov)}
+function download(name,text){const a=document.createElement('a');
+ a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));a.download=name;a.click()}
+function exportCSV(){let s='id,pos_x,pos_y,pos_z,rot_y_deg,type,width_m,depth_m,height_m,scale,district,seed,warp\n';
+ V.buildings.forEach((b,i)=>{s+=[i,b.x.toFixed(3),0,b.z.toFixed(3),
+  (((b.rot%360)+360)%360).toFixed(2),b.type,b.w,b.d,b.h,1,b.district,T.seed,T.warp].join(',')+'\n'});
+ download('buildings_seed'+T.seed+'.csv',s)}
+function exportJSON(){download('town_seed'+T.seed+'.json',
+ JSON.stringify({seed:T.seed,warp:T.warp,R:T.R,buildings:V.buildings,
+  wall:V.wall,roads:V.roads,river:V.river,blocks:V.blocks},null,1))}
+const MENU=[['New town','Enter',()=>regen()],['Warp mode','W',()=>setMode('warp')],
+ ['Export CSV (Houdini/PCG)','',()=>exportCSV()],['Export JSON','',()=>exportJSON()]];
+const WARPMENU=[['Apply warp','Enter',()=>setMode('map')],['Discard warp','Esc',()=>{resetWarp();setMode('map')}],
+ ['Export CSV (Houdini/PCG)','',()=>exportCSV()],['Export JSON','',()=>exportJSON()]];
+function openMenu(x,y){menu.innerHTML='';
+ for(const[label,key,fn]of(mode==='warp'?WARPMENU:MENU)){const b=document.createElement('button');
+  b.textContent=label+(key?'   ['+key+']':'');
+  b.onclick=()=>{menu.style.display='none';fn()};menu.appendChild(b)}
+ menu.style.display='flex';menu.style.left=x+'px';menu.style.top=y+'px'}
 const toWorld=e=>{const r=cv.getBoundingClientRect(),sx=cv.width/r.width,sz=cv.height/r.height;
  return[(e.clientX-r.left)*sx/view.s+view.ox,(e.clientY-r.top)*sz/view.s+view.oz]};
 let hov=null;
-cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);const[x,z]=toWorld(e);
+cv.addEventListener('contextmenu',e=>{e.preventDefault();openMenu(e.clientX,e.clientY)});
+document.addEventListener('click',e=>{if(!menu.contains(e.target))menu.style.display='none'});
+cv.addEventListener('pointerdown',e=>{if(e.button===2)return;cv.setPointerCapture(e.pointerId);
+ const[x,z]=toWorld(e);
+ if(mode!=='warp')return; // map mode: drag does nothing (menu via right-click)
  if(tool==='measure'){measurePts.push([x,z]);
   if(measurePts.length===2){hint.textContent='distance: '+Math.hypot(measurePts[0][0]-measurePts[1][0],measurePts[0][1]-measurePts[1][1]).toFixed(1)+' m';measurePts=[]}
   else hint.textContent='measure · click second point';return}
- if(tool==='equalize'){V.buildings.forEach(b=>{/* base snap below */});
+ if(tool==='equalize'){
   T.basePlaced.forEach(b=>{if(Math.hypot(b.x-x,b.z-z)<+brushEl.value)b.rot=Math.round(b.rot/15)*15});
   V=current();draw(V,hov);return}
  drag={x,z}});
 cv.addEventListener('pointermove',e=>{const[x,z]=toWorld(e);hov=[x,z];
- if(drag){T.mesh.brush(tool,(drag.x+x)/2,(drag.z+z)/2,+brushEl.value,x-drag.x,z-drag.z);
-  drag={x,z};V=current();draw(V,hov)}else draw(V,hov)});
+ if(drag&&mode==='warp'){T.mesh.brush(tool,(drag.x+x)/2,(drag.z+z)/2,+brushEl.value,x-drag.x,z-drag.z);
+  drag={x,z};V=current();draw(V,hov)}});
 cv.addEventListener('pointerup',()=>drag=null);
 cv.addEventListener('wheel',e=>{e.preventDefault();
  brushEl.value=Math.max(10,Math.min(220,+brushEl.value+(e.deltaY>0?-8:8)));
- brushval.textContent=brushEl.value;draw(V,hov)},{passive:false});
-showmesh.onchange=()=>draw(V,hov);
+ brushval.textContent=brushEl.value;if(mode==='warp')draw(V,hov)},{passive:false});
 document.addEventListener('keydown',e=>{
  const k=e.key.toLowerCase();
  const map={d:'displace',l:'liquify',r:'rotate',b:'bloat',x:'relax',e:'equalize',m:'measure'};
- if(map[k]){tool=map[k];document.querySelectorAll('.tool').forEach((x,i)=>x.classList.toggle('on',TOOLS[i][0]===tool));
+ if(mode==='warp'&&map[k]){tool=map[k];[...toolsEl.children].forEach((x,i)=>x.classList.toggle('on',TOOLS[i][0]===tool));
   hint.textContent=tool+' · drag to warp the mesh'}
- if(e.key==='Enter')regen();if(e.key==='Escape')resetWarp();
- if(e.key==='+'||e.key==='=')brushEl.value=Math.min(220,+brushEl.value+10);
- if(e.key==='-')brushEl.value=Math.max(10,+brushEl.value-10);
- brushval.textContent=brushEl.value;if(V)draw(V,hov)});
+ if(k==='w'){setMode(mode==='warp'?'map':'warp');return}
+ if(e.key==='Enter'){if(mode==='warp')setMode('map');else regen();return}
+ if(e.key==='Escape'){if(mode==='warp'){resetWarp();setMode('map')}return}
+ if(mode==='warp'&&(e.key==='+'||e.key==='='))brushEl.value=Math.min(220,+brushEl.value+10);
+ if(mode==='warp'&&e.key==='-')brushEl.value=Math.max(10,+brushEl.value-10);
+ brushval.textContent=brushEl.value;if(mode==='warp'&&V)draw(V,hov)});
 
-// ---- controls ----
-const seedEl=document.getElementById('seed'),warpEl=document.getElementById('warp'),
- sizeEl=document.getElementById('size');
+// ---- controls: small town only (size 17 locked), seed + warp ----
+const seedEl=document.getElementById('seed'),warpEl=document.getElementById('warp');
 warpEl.oninput=()=>warpval.textContent=(+warpEl.value).toFixed(2);
-brushEl.oninput=()=>{brushval.textContent=brushEl.value;if(V)draw(V,hov)};
-function regen(){T=genTown(String(seedEl.value).trim(),+warpEl.value,+sizeEl.value||17);
- snap0=T.mesh.snapshot();V=current();fit(V);draw(V)}
+brushEl.oninput=()=>{brushval.textContent=brushEl.value;if(mode==='warp'&&V)draw(V,hov)};
+function regen(){T=genTown(String(seedEl.value).trim(),+warpEl.value,17);
+ snap0=T.mesh.snapshot();V=current();fit(V);V._drawn=false;draw(V);V._drawn=true;
+ T.basePlaced.forEach(b=>b._r0=b.rot);setMode('map')}
 function resetWarp(){if(snap0){T.mesh.restore(snap0);
  T.basePlaced.forEach(b=>{if(b._r0!==undefined)b.rot=b._r0});
- V=current();draw(V,hov);hint.textContent='warp discarded · back to generated mesh'}}
+ V=current();draw(V,hov)}}
 document.getElementById('regen').onclick=regen;
-document.getElementById('reset').onclick=resetWarp;
-function download(name,text){const a=document.createElement('a');
- a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));a.download=name;a.click()}
-document.getElementById('expcsv').onclick=()=>{
- let s='id,pos_x,pos_y,pos_z,rot_y_deg,type,width_m,depth_m,height_m,scale,district,seed,warp\n';
- V.buildings.forEach((b,i)=>{s+=[i,b.x.toFixed(3),0,b.z.toFixed(3),
-  (((b.rot%360)+360)%360).toFixed(2),b.type,b.w,b.d,b.h,1,b.district,T.seed,T.warp].join(',')+'\n'});
- download('buildings_seed'+T.seed+'.csv',s)};
-document.getElementById('expjson').onclick=()=>download('town_seed'+T.seed+'.json',
- JSON.stringify({seed:T.seed,warp:T.warp,R:T.R,buildings:V.buildings,
-  wall:V.wall,roads:V.roads,river:V.river,blocks:V.blocks},null,1));
-// stash base rotations for equalize reset
-const _regen=regen;
-regen=function(){_regen();T.basePlaced.forEach(b=>b._r0=b.rot)};
 regen();
 </script>
 </body>

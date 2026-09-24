@@ -3,16 +3,22 @@
 Stdlib-only Python. No install. 1 unit = 1 meter, Y-up.
 
 Model (Parish & Muller 2001 road growth + CityGen blocks + Watabou wards):
-arterial/ring skeleton → **blocks** (quads split by alleys) → **lots** along
-street frontages → one footprint inscribed per lot → perimeter blocks with
-free courtyards. Buildings form blocks, exactly like the original.
+arterial/ring skeleton → **blocks** (quads split by alleys) → **lots** via the
+original `Ward.createAlleys` recursion (inset block, longest-edge bisect at a
+spread ratio, 0.6 m alley gap, min-size + empty-lot rules) → one footprint
+inscribed per lot → perimeter blocks. Buildings form blocks, exactly like
+the original. Rendered in the original DEFAULT palette
+(paper `#ccc5b8`, light `#99948a`, medium `#67635c`, dark `#1a1917`):
+roads drawn as medium casing + paper core, walls dark thick with towers,
+single ink style for all buildings.
 
-## 0. Browser lab (warp UI, original mesh system)
+## 0. Browser lab (original look, warp UX, small town only)
 
-https://ibackstrom.github.io/city-pipeline/ — seed/warp/size inputs, canvas
-preview, warp brushes on the **shared mesh lattice** (every layer — walls,
-roads, river, blocks, buildings — is evaluated through the mesh nodes,
-exactly like the original warp mode; toggle "show warp mesh" to see it):
+https://ibackstrom.github.io/city-pipeline/ — fullscreen parchment map,
+locked **Small Town · 17** preset, only seed + warp inputs. Right-click opens
+the menu (New town / Warp mode / Export CSV / Export JSON), like the
+original; warp mode shows the tool panel + mesh lattice and the brush ring.
+`Enter` = new town / apply warp, `Esc` = discard warp, `W` toggles warp mode.
 
 | Tool | Key | Does |
 |------|-----|------|
@@ -24,9 +30,12 @@ exactly like the original warp mode; toggle "show warp mesh" to see it):
 | Equalize | E | snap building angles to 15° |
 | Measure | M | click two points → meters |
 
-Wheel or `+`/`-` = brush size. `Enter` = regenerate, `Esc` = discard warp.
+Wheel or `+`/`-` = brush size.
 `Export CSV` downloads `buildings.csv` with the same columns as the Python
 output (warped state included) — straight into Houdini/PCG.
+
+Limited geometry by design: small-town radius only (~110 m), coarse warp
+lattice (~R/6 spacing), ~100 buildings, plain canvas fills — no heavy layers.
 
 ## 1. Generate (your Watabou preset)
 
