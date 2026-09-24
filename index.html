@@ -18,7 +18,7 @@
 #warpbar button.on{background:var(--dark);color:var(--paper)}
 #warpbar button kbd{float:right;margin-left:12px;opacity:.6}
 #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
-canvas{background:var(--paper);cursor:crosshair;touch-action:none}
+canvas{background:var(--paper);cursor:crosshair;touch-action:none;max-width:100%;max-height:100vh}
 #hint{position:fixed;left:10px;bottom:8px;z-index:5;font-size:12px;font-style:italic;opacity:.75}
 #menu{position:fixed;left:10px;bottom:28px;z-index:6;display:none;flex-direction:column;background:rgba(204,197,184,.97);border:1px solid var(--dark);min-width:220px}
 #menu button{font-family:inherit;font-size:13px;background:none;border:none;color:var(--dark);padding:7px 12px;cursor:pointer;text-align:left}
@@ -36,6 +36,14 @@ canvas{background:var(--paper);cursor:crosshair;touch-action:none}
 <div style="font-size:12px;padding:2px 10px">brush <input id="brush" type="range" min="10" max="260" value="90" style="width:90px"> <span id="brushval">90</span></div>
 </div>
 <div id="stage"><canvas id="cv" width="900" height="900"></canvas></div>
+<div id="err" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99;display:none;max-width:80%;background:#fff;color:#a00;border:2px solid #a00;padding:14px 18px;font:13px monospace;white-space:pre-wrap"></div>
+<script>
+window.addEventListener('error',function(e){
+ var d=document.getElementById('err');
+ d.style.display='block';
+ d.textContent='Error: '+(e.message||e.error)+'\n\nHard-refresh first (Cmd/Ctrl+Shift+R) — if this persists, send me this message.';
+});
+</script>
 <div id="hint">right-click: menu · Enter: new city · hover a building</div>
 <div id="menu"></div>
 <script>
@@ -882,8 +890,8 @@ function polyFrame(poly){const n=poly.length;
  const r=ang*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
  const xs=poly.map(p=>p.x*c+p.y*s),zs=poly.map(p=>-p.x*s+p.y*c);
  const w=Math.max(...xs)-Math.min(...xs),d=Math.max(...zs)-Math.min(...zs);
- const cx=(Math.min(xs)+Math.max(xs))/2,cz=(Math.min(zs)+Math.max(zs))/2;
- return{cx:c*cx-s*cz,cz:c*cz+s*cz,ang,w,d}}
+ const cx=(Math.min(...xs)+Math.max(...xs))/2,cz=(Math.min(...zs)+Math.max(...zs))/2;
+ return{cx:c*cx-s*cz,cz:s*cx+c*cz,ang,w,d}}
 
 function genTown(seed,warp,size){
  const m=new Model(size,seed,true);
@@ -1118,12 +1126,14 @@ document.addEventListener('keydown',e=>{
 sizeEl.oninput=()=>sizeval.textContent=sizeEl.value;
 warpEl.oninput=()=>warpval.textContent=(+warpEl.value).toFixed(2);
 brushEl.oninput=()=>{brushval.textContent=brushEl.value;if(mode==='warp')draw(hov)};
-function regen(){
+function regen(){try{
  const seed=1+Math.floor(Math.random()*2147483646); // pure random
  T=genTown(seed,+warpEl.value,+sizeEl.value||25);
  // base rows (pre-warp) kept for reevaluation after brushes
  T.baseRows=T.rows.map(r=>({...r,bx:r.x,bz:r.z,bAng:r.rot}));
  snap0=T.mesh.snapshot();fit();draw();setMode('map')}
+ catch(e){var d=document.getElementById('err');d.style.display='block';
+  d.textContent='Generation error: '+(e&&e.message?e.message:e)+' — click \"new city\" to retry.'}}
 function resetWarp(){if(snap0){T.mesh.restore(snap0);reevaluate();draw(hov)}}
 document.getElementById('regen').onclick=regen;
 regen();
