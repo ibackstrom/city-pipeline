@@ -36,7 +36,7 @@ a{color:var(--dark)}
 <div class="row"><b>warp</b><input id="warp" type="range" min="0" max="1" step="0.01" value="0.35"><span id="warpval">0.35</span></div>
 <div class="row" id="counts" style="font-size:12px;font-style:italic"></div>
 </div>
-<div id="sizes"><button class="locked">Small Town · 17</button></div>
+<div id="sizes"><button class="locked">Small Town · 10</button></div>
 <div id="warpbar"><div id="tools"></div>
 <div style="font-size:12px;padding:2px 10px">brush <input id="brush" type="range" min="10" max="220" value="90" style="width:90px"> <span id="brushval">90</span></div>
 </div>
@@ -105,8 +105,8 @@ function genTown(seed,warp,size){
  const N=48,w1=rng.next()*6.28,w2=rng.next()*6.28,wall=[];
  for(let i=0;i<N;i++){const a=2*Math.PI*i/N,rr=R*(1+0.05*Math.sin(3*a+w1)+0.03*Math.sin(5*a+w2));
   wall.push([Math.cos(a)*rr,Math.sin(a)*rr])}
- const ra=rng.next()*Math.PI,rw=9+rng.next()*3,rdx=Math.cos(ra),rdz=Math.sin(ra),rnx=-rdz,rnz=rdx;
- const mph=rng.next()*6.28,mamp=12+warp*22,river=[];
+ const ra=rng.next()*Math.PI,rw=7+rng.next()*2,rdx=Math.cos(ra),rdz=Math.sin(ra),rnx=-rdz,rnz=rdx;
+ const mph=rng.next()*6.28,mamp=6+warp*8,river=[];
  for(let t=-14;t<=14;t++){const s=t*R/12,o=mamp*Math.sin(s*0.02+mph);river.push([rdx*s+rnx*o,rdz*s+rnz*o])}
  const dPoly=(x,z,pls)=>{let b=1e9,ba=0;for(const L of pls)for(let i=0;i<L.length-1;i++){
   const ax=L[i][0],az=L[i][1],dx=L[i+1][0]-ax,dz=L[i+1][1]-az,l2=dx*dx+dz*dz||1;
@@ -117,7 +117,7 @@ function genTown(seed,warp,size){
   const[x1,z1]=wall[i],[x2,z2]=wall[(i+1)%wall.length];
   if((z1>z)!==(z2>z)&&x<(x2-x1)*(z-z1)/(z2-z1+1e-12)+x1)ins=!ins}return ins};
  let ca=rng.next()*2*Math.PI,cc=[Math.cos(ca)*R*0.32,Math.sin(ca)*R*0.32];
- if(rDist(cc[0],cc[1])<rw/2+26)cc=[-cc[0],-cc[1]];
+ if(rDist(cc[0],cc[1])<rw/2+20)cc=[-cc[0],-cc[1]];
  let mc=[0,0];
  if(rDist(0,0)<rw/2+14)outer:for(let k=1;k<8;k++)for(const s of[1,-1]){
   const c=[rnx*s*k*8,rnz*s*k*8];if(rDist(c[0],c[1])>rw/2+14){mc=c;break outer}}
@@ -128,20 +128,20 @@ function genTown(seed,warp,size){
   const wig=Math.sin(fr*5+a*3)*(4+warp*8)*Math.sin(fr*Math.PI);
   return[bx-Math.sin(a)*wig,bz+Math.cos(a)*wig]};
  const radials=rAng.map(a=>{const p=[];for(let s=0;s<=7;s++)p.push(rPt(a,s/7));return p});
- const rings=[0.16,0.45,0.75].map(fr=>{const p=[];for(let i=0;i<N;i++){const a=2*Math.PI*i/N;
+ const rings=[0.45,0.78].map(fr=>{const p=[];for(let i=0;i<N;i++){const a=2*Math.PI*i/N;
   p.push([mc[0]+Math.cos(a)*R*fr,mc[1]+Math.sin(a)*R*fr])}p.push(p[0].slice());return p});
  const roads=[...radials,...rings];
  const xs=[...wall.map(p=>p[0]),...river.map(p=>p[0])],zs=[...wall.map(p=>p[1]),...river.map(p=>p[1])];
  const mesh=WarpMesh(Math.min(...xs)-15,Math.max(...xs)+15,Math.min(...zs)-15,Math.max(...zs)+15,
-  R/6,rng,warp,R,PH);
+  R/5,rng,warp,R,PH);
  // blocks: quads between consecutive radials x rings
  const wallAt=a=>wall.reduce((m,p)=>{const d=Math.abs((Math.atan2(p[1],p[0])-a+Math.PI*3)%(Math.PI*2)-Math.PI);
   return d<m.d?{d,p}:m},{d:1e9}).p;
- const rp=[0.16,0.45,0.75].map(fr=>rAng.map(a=>rPt(a,fr)));rp.push(rAng.map(wallAt));
+ const rp=[0.45,0.78].map(fr=>rAng.map(a=>rPt(a,fr)));rp.push(rAng.map(wallAt));
  const alleys=[];
  function split(q,depth){const E=q.map((p,k)=>[p,q[(k+1)%4]]);
   const L=E.map(([a,b])=>Math.hypot(b[0]-a[0],b[1]-a[1]));
-  if(Math.max(...L)<50||depth>3)return[q];
+  if(Math.max(...L)<40||depth>3)return[q];
   const e=L.indexOf(Math.max(...L)),e2=(e+2)%4,t=0.5+rng.uniform(-0.12,0.12);
   const[a1,b1]=E[e],[a2,b2]=E[e2];
   const m1=[a1[0]+(b1[0]-a1[0])*t,a1[1]+(b1[1]-a1[1])*t],m2=[a2[0]+(b2[0]-a2[0])*t,a2[1]+(b2[1]-a2[1])*t];
@@ -229,35 +229,59 @@ function genTown(seed,warp,size){
   const xs=lot.map(p=>p[0]*c+p[1]*s),zs=lot.map(p=>-p[0]*s+p[1]*c);
   const x0=Math.min(...xs),x1=Math.max(...xs),z0=Math.min(...zs),z1=Math.max(...zs);
   return{w:x1-x0,h:z1-z0,ang,cx:(x0+x1)/2,cz:(z0+z1)/2,c,s}}
+ // exactly N instances of every common type (small scatter set)
+ const INST=5,remaining={};houses.forEach(t=>remaining[t.name]=INST);
  blocks.forEach((blk)=>{if(blk.length<3)return;
   const cx=blk.reduce((s,p)=>s+p[0],0)/blk.length,cz=blk.reduce((s,p)=>s+p[1],0)/blk.length;
   const rn=Math.hypot(cx-mc[0],cz-mc[1])/R,dist=rn<0.35?'center':rn<0.7?'mid':'edge';
   const inner=shrink(blk,0.8);
   if(inner.length<3||polyArea(inner)<10)return;
+  outer:
   for(const lot of createAlleys(inner)){if(lot.length<3)continue;
    const F=lotFrame(lot),qx=F.cx*F.c-F.cz*F.s,qz=F.cx*F.s+F.cz*F.c;
    let cands=houses.filter(t=>t.w<=F.w-0.4&&t.d<=F.h-0.4),rotated=false;
    if(!cands.length){cands=houses.filter(t=>t.d<=F.w-0.4&&t.w<=F.h-0.4);rotated=true}
+   cands=cands.filter(t=>remaining[t.name]>0);
    if(rn>0.7)cands=cands.filter(t=>t.w*t.d<=100);
    if(rn<0.35)cands=cands.filter(t=>t.w*t.d>=48);
    if(!cands.length)continue;
    const cw=cands.map(t=>t.weight),seen=new Set(),order=[];
    for(let k=0;k<3;k++){const sp=rng.pickW(cands,cw);if(!seen.has(sp.name)){seen.add(sp.name);order.push(sp)}}
-   order.push(...[...cands].sort((a,b)=>a.w*a.d-b.w*b.d));
-   for(const spec of order)
-    if(tryPlace(qx,qz,F.ang+(rotated?90:0),spec,dist))break}});
- for(const big of['house_D_hall','house_E_warehouse']){const spec=houses.find(t=>t.name===big);
-  if(!spec)continue;
-  for(let k=0;k<300;k++){const a=rng.next()*2*Math.PI,rr=R*rng.uniform(0.22,0.38);
-   const qx=mc[0]+Math.cos(a)*rr,qz=mc[1]+Math.sin(a)*rr;
-   const[dr,ra2]=dPoly(qx,qz,roads);
-   if(dr<RHALF+1+Math.min(spec.w,spec.d)/2*0.35)continue;
-   if(tryPlace(qx,qz,ra2+(rng.next()<0.7?0:90),spec,'center'))break}}
+   order.push(...[...cands].sort((a,b)=>b.w*b.d-a.w*a.d));
+   for(const spec of order){
+    if(remaining[spec.name]<=0)continue;
+    if(tryPlace(qx,qz,F.ang+(rotated?90:0),spec,dist)){remaining[spec.name]--;break}}
+   if(houses.every(t=>remaining[t.name]<=0))break outer}});
+ // shortfall fallback: street-front / free-standing until each type hits N;
+ // largest types pick first (mirrors city_gen.py)
+ const segs=[];for(const L of roads)for(let i=0;i<L.length-1;i++)segs.push([L[i],L[i+1]]);
+ for(const name of [...Object.keys(remaining)].sort((a,b)=>{
+   const sa=houses.find(t=>t.name===a),sb=houses.find(t=>t.name===b);
+   return sb.w*sb.d-sa.w*sa.d})){
+  const spec=houses.find(t=>t.name===name);if(!spec)continue;
+  let tries=0;
+  while(remaining[name]>0&&tries<80000){tries++;
+   let qx,qz,rot;
+   if(rng.next()<0.25){const a=rng.next()*2*Math.PI,rr=R*rng.uniform(0.15,0.9);
+    qx=mc[0]+Math.cos(a)*rr;qz=mc[1]+Math.sin(a)*rr;
+    const[dr,ra2]=dPoly(qx,qz,roads);
+    if(dr<RHALF+1+Math.min(spec.w,spec.d)/2*0.35)continue;
+    rot=ra2+(rng.next()<0.7?0:90)}
+   else{const[[ax,az],[bx,bz]]=segs[(rng.next()*segs.length)|0];
+    const sl=Math.hypot(bx-ax,bz-az)||1,ex=(bx-ax)/sl,ez=(bz-az)/sl,nx=-ez,nz=ex;
+    const t=rng.next(),px=ax+(bx-ax)*t,pz=az+(bz-az)*t,side=rng.next()<0.5?-1:1;
+    const off=RHALF+1+spec.d/2+rng.next();
+    qx=px+nx*side*off;qz=pz+nz*side*off;
+    rot=Math.atan2(ez,ex)*180/Math.PI+(rng.next()<0.5?90:0)}
+   const nw=tries>3000;
+   let ok=tryPlace(qx,qz,rot,spec,'center',nw);
+   if(!ok)ok=tryPlace(qx,qz,rot+90,spec,'center',nw);
+   if(ok)remaining[name]--}}
  const castle=TYPES.find(t=>t.name==='castle'),market=TYPES.find(t=>t.name==='market');
  const am=Math.atan2(mc[1]-cc[1],mc[0]-cc[0])*180/Math.PI;
  placed.push({x:cc[0],z:cc[1],rot:((-am%360)+360)%360,type:'castle',w:castle.w,d:castle.d,h:castle.h,district:'citadel'});
  placed.push({x:mc[0],z:mc[1],rot:rng.next()*90,type:'market',w:market.w,d:market.d,h:market.h,district:'market'});
- return{seed,warp,R,riverW:rw,citadel:{x:cc[0],z:cc[1],r:24},market:{x:mc[0],z:mc[1]},
+ return{seed,warp,R,riverW:rw,citadel:{x:cc[0],z:cc[1],r:18},market:{x:mc[0],z:mc[1]},
   wall,roads,alleys,river,blocks,basePlaced:placed,mesh};
 }
 
@@ -402,7 +426,7 @@ document.addEventListener('keydown',e=>{
 const seedEl=document.getElementById('seed'),warpEl=document.getElementById('warp');
 warpEl.oninput=()=>warpval.textContent=(+warpEl.value).toFixed(2);
 brushEl.oninput=()=>{brushval.textContent=brushEl.value;if(mode==='warp'&&V)draw(V,hov)};
-function regen(){T=genTown(String(seedEl.value).trim(),+warpEl.value,17);
+function regen(){T=genTown(String(seedEl.value).trim(),+warpEl.value,10);
  snap0=T.mesh.snapshot();V=current();fit(V);V._drawn=false;draw(V);V._drawn=true;
  T.basePlaced.forEach(b=>b._r0=b.rot);setMode('map')}
 function resetWarp(){if(snap0){T.mesh.restore(snap0);

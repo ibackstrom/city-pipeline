@@ -1,27 +1,27 @@
 {
   "seed": 1555148727,
   "warp": 0.35,
-  "R": 110.5,
+  "R": 65.0,
   "citadel": {
-    "x": 35.22302689282048,
-    "z": -3.109336988434295,
-    "r": 24.0
+    "x": -20.719427584012045,
+    "z": 1.8290217579025267,
+    "r": 18.0
   },
   "market": {
-    "x": 0.0,
-    "z": 0.0
+    "x": 9.051950749673058,
+    "z": -13.193262963554293
   },
-  "river_w": 9.35378167040049,
-  "mesh_spacing": 18.416666666666668,
+  "river_w": 7.23585444693366,
+  "mesh_spacing": 13.0,
   "counts": {
     "castle": 1,
-    "house_A_cottage": 52,
-    "house_B_row": 35,
-    "house_C_merchant": 11,
-    "house_D_hall": 3,
-    "house_E_warehouse": 1,
+    "house_A_cottage": 5,
+    "house_B_row": 5,
+    "house_C_merchant": 5,
+    "house_D_hall": 5,
+    "house_E_warehouse": 5,
     "market": 1
   },
-  "blocks": 33,
-  "lots": 102
+  "blocks": 21,
+  "lots": 19
 }

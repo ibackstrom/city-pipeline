@@ -2,20 +2,25 @@
 
 Stdlib-only Python. No install. 1 unit = 1 meter, Y-up.
 
+Small town, original-style: size 10 (~65 m radius), citadel + walls + river,
+**exactly 5 instances of each of the 5 common building types** + market +
+castle = 27 scatter points (`instances_per_type` in `buildings.json`).
+
 Model (Parish & Muller 2001 road growth + CityGen blocks + Watabou wards):
 arterial/ring skeleton → **blocks** (quads split by alleys) → **lots** via the
 original `Ward.createAlleys` recursion (inset block, longest-edge bisect at a
 spread ratio, 0.6 m alley gap, min-size + empty-lot rules) → one footprint
-inscribed per lot → perimeter blocks. Buildings form blocks, exactly like
-the original. Rendered in the original DEFAULT palette
-(paper `#ccc5b8`, light `#99948a`, medium `#67635c`, dark `#1a1917`):
-roads drawn as medium casing + paper core, walls dark thick with towers,
-single ink style for all buildings.
+inscribed per lot until each type reaches its instance count; any shortfall
+falls back to street-front / free-standing placement. Rendered in the
+original DEFAULT palette (paper `#ccc5b8`, light `#99948a`, medium
+`#67635c`, dark `#1a1917`): roads drawn as medium casing + paper core, walls
+dark thick with towers, single ink style for all buildings.
 
 ## 0. Browser lab (original look, warp UX, small town only)
 
 https://ibackstrom.github.io/city-pipeline/ — fullscreen parchment map,
-locked **Small Town · 17** preset, only seed + warp inputs. Right-click opens
+locked **Small Town · 10** preset, only seed + warp inputs, exactly 5
+instances per common type. Right-click opens
 the menu (New town / Warp mode / Export CSV / Export JSON), like the
 original; warp mode shows the tool panel + mesh lattice and the brush ring.
 `Enter` = new town / apply warp, `Esc` = discard warp, `W` toggles warp mode.
@@ -34,19 +39,18 @@ Wheel or `+`/`-` = brush size.
 `Export CSV` downloads `buildings.csv` with the same columns as the Python
 output (warped state included) — straight into Houdini/PCG.
 
-Limited geometry by design: small-town radius only (~110 m), coarse warp
-lattice (~R/6 spacing), ~100 buildings, plain canvas fills — no heavy layers.
+Limited geometry by design: small-town radius only (~65 m), coarse warp
+lattice (~R/5 spacing), 27 buildings, plain canvas fills — no heavy layers.
 
 ## 1. Generate (your Watabou preset)
 
 ```bash
-# exact small town from your link: citadel+walls+river, size 17
-python3 city_gen.py --seed 1555148727 --warp 0.35 --size 17 --outdir ./out_town
+# small town (default: size 10, 5 instances per common type)
+python3 city_gen.py --seed 1555148727 --warp 0.35 --outdir ./out_town
 
-# other options
-python3 city_gen.py --seed 42 --warp 0.0  --size 17 --outdir ./out_round   # no warp = regular
-python3 city_gen.py --seed 42 --warp 0.8  --size 17 --outdir ./out_organic # heavy warp
-python3 city_gen.py --seed 7  --warp 0.4  --radius 110 --outdir ./out      # explicit meters
+# variations
+python3 city_gen.py --seed 42 --warp 0.0  --outdir ./out_round   # no warp = regular
+python3 city_gen.py --seed 42 --warp 0.8  --outdir ./out_organic # heavy warp
 ```
 
 `warp` = Watabou warp-tool equivalent: domain distortion of walls, roads,
@@ -62,10 +66,12 @@ Output in `outdir/`:
 - `preview.svg` — blocks, lots implied, buildings, roads
 - `manifest.json` — seed/warp echo + counts
 
-Placement is block-based: lots line each block's street frontages (lot sizes
-derive from the library so every type fits somewhere), one footprint
-inscribed per lot, 0.8 m alleys between buildings, clear courtyards inside
-blocks. Large halls/warehouses get dedicated plots near the plaza.
+Placement is block-based: each block is inset from its streets and cut into
+lots by the original alley recursion; one exact footprint is inscribed per
+lot (0.8 m gaps, OBB overlap rejection) until every common type reaches its
+instance count — any shortfall falls back to street-front or free-standing
+plots. `manifest.json` reports per-type counts (verified exact
+5/5/5/5/5 + castle + market across 28 seeds, Python and browser alike).
 
 ## 2. Fit your actual house sizes
 

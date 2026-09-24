@@ -210,11 +210,11 @@ def generate(seed, warp, R, lib):
         wall.append((math.cos(a) * rr, math.sin(a) * rr))
 
     river_ang = rng.random() * math.pi
-    river_w = 9.0 + rng.random() * 3.0
+    river_w = 7.0 + rng.random() * 2.0
     rdx, rdz = math.cos(river_ang), math.sin(river_ang)
     rnx, rnz = -rdz, rdx
     meander_ph = rng.random() * 6.28
-    meander_amp = 12.0 + warp * 22.0
+    meander_amp = 6.0 + warp * 8.0
     river = []
     for t in range(-14, 15):
         s = t * R / 12.0
@@ -226,9 +226,9 @@ def generate(seed, warp, R, lib):
 
     cit_ang = rng.random() * 2 * math.pi
     cit_c = (math.cos(cit_ang) * R * 0.32, math.sin(cit_ang) * R * 0.32)
-    if river_dist(*cit_c) < river_w / 2 + 26:
+    if river_dist(*cit_c) < river_w / 2 + 20:
         cit_c = (-cit_c[0], -cit_c[1])
-    cit_R = 24.0
+    cit_R = 18.0
 
     market_c = (0.0, 0.0)
     if river_dist(0, 0) < river_w / 2 + 14:
@@ -260,7 +260,7 @@ def generate(seed, warp, R, lib):
     for a in radial_ang:
         radials.append([radial_pt(a, s / 7, 1.0) for s in range(8)])
 
-    ring_fracs = [0.16, 0.45, 0.75]
+    ring_fracs = [0.45, 0.78]
     rings = []
     for frac in ring_fracs:
         pts = []
@@ -275,8 +275,8 @@ def generate(seed, warp, R, lib):
     # -- warp mesh over the base layout
     xs = [p[0] for p in wall] + [r[0] for r in river]
     zs = [p[1] for p in wall] + [r[1] for r in river]
-    mesh = WarpMesh(min(xs) - 15, max(xs) + 15, min(zs) - 15, max(zs) + 15,
-                    R / 6.0, rng, warp, R, phases)
+    mesh = WarpMesh(min(xs) - 12, max(xs) + 12, min(zs) - 12, max(zs) + 12,
+                    R / 5.0, rng, warp, R, phases)
 
     # -- blocks: quads between consecutive radials x rings (CityGen faces).
     #   ring boundary 3 = wall: nearest wall vertex per radial angle.
@@ -294,7 +294,7 @@ def generate(seed, warp, R, lib):
         """Recursively split long quads with alleys (watabou wards)."""
         edges = [(q[k], q[(k + 1) % 4]) for k in range(4)]
         lens = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in edges]
-        if max(lens) < 50 or depth > 3:
+        if max(lens) < 40 or depth > 3:
             return [q]
         e = lens.index(max(lens))
         e2 = (e + 2) % 4  # opposite edge
@@ -348,25 +348,38 @@ def generate(seed, warp, R, lib):
     #   footprint per lot -> perimeter blocks with free courtyards.
     gap = lib.get('gap_m', 0.8)
     house_types = [t for t in lib['types'] if t['weight'] > 0]
+    # exactly N instances of every common type (small scatter set)
+    INST = lib.get('instances_per_type', 5)
+    remaining = {t['name']: INST for t in house_types}
     placed = []
     placed_obbs = []
     lots = []
 
-    def clear_of_water_hill(qx, qz):
+    def clear_of_water_hill(qx, qz, near_wall_ok=False):
         if not point_in_poly(qx, qz, wall):
             return False
         if river_dist(qx, qz) < river_w / 2 + 1.0:
             return False
         if math.hypot(qx - cit_c[0], qz - cit_c[1]) < cit_R:
             return False
+        if not near_wall_ok:
+            # keep buildings off the curtain wall
+            dmin = 1e9
+            for i in range(len(wall)):
+                ax, az = wall[i]
+                bx, bz = wall[(i + 1) % len(wall)]
+                dd, _, _, _ = dist_pt_seg(qx, qz, ax, az, bx, bz)
+                dmin = min(dmin, dd)
+            if dmin < 2.5:
+                return False
         return True
 
-    def try_place(cx, cz, rot, spec, district):
+    def try_place(cx, cz, rot, spec, district, near_wall_ok=False):
         w, d = spec['w'], spec['d']
-        if not clear_of_water_hill(cx, cz):
+        if not clear_of_water_hill(cx, cz, near_wall_ok):
             return False
         for (qx, qz) in obb_corners(cx, cz, w, d, rot):
-            if not clear_of_water_hill(qx, qz):
+            if not clear_of_water_hill(qx, qz, True):
                 return False
         # no alley-distance check: lots already share the original 0.6 m
         # alley gaps, and OBB overlap below keeps footprints apart
@@ -556,6 +569,7 @@ def generate(seed, warp, R, lib):
                 rotated = True
             else:
                 rotated = False
+            cands = [t for t in cands if remaining[t['name']] > 0]
             if r_norm > 0.7:
                 cands = [t for t in cands if t['w'] * t['d'] <= 100] or cands
             if r_norm < 0.35:
@@ -569,30 +583,63 @@ def generate(seed, warp, R, lib):
                 if spec['name'] not in tried:
                     tried.add(spec['name'])
                     order.append(spec)
-            order += sorted(cands, key=lambda t: t['w'] * t['d'])
+            order += sorted(cands, key=lambda t: -(t['w'] * t['d']))
             rot = ang + (90 if rotated else 0)
             for spec in order:
+                if remaining[spec['name']] <= 0:
+                    continue
                 if try_place(qx, qz, rot, spec, district):
+                    remaining[spec['name']] -= 1
                     lots.append({'x': qx, 'z': qz, 'rot': rot,
                                  'frontage': round(lw, 2), 'block': b})
                     break
+            if all(v <= 0 for v in remaining.values()):
+                break  # every type has its N instances — done placing
 
-    # large free-standing buildings (hall, warehouse): dedicated plots near
-    # the plaza, like the original's large ward buildings
-    for big_name in ('house_D_hall', 'house_E_warehouse'):
-        spec = next((t for t in house_types if t['name'] == big_name), None)
+    # any type still short of N instances: street-front / free-standing
+    # plots (large ward buildings in the original); largest types pick first
+    order_names = sorted(remaining,
+                         key=lambda n: -(next(t['w'] * t['d'] for t in house_types
+                                              if t['name'] == n)))
+    segs = []
+    for line in all_roads:
+        for i in range(len(line) - 1):
+            segs.append((line[i], line[i + 1]))
+    for name in order_names:
+        spec = next((t for t in house_types if t['name'] == name), None)
         if spec is None:
             continue
-        for _ in range(300):
-            a = rng.random() * 2 * math.pi
-            rr = R * rng.uniform(0.22, 0.38)
-            qx, qz = market_c[0] + math.cos(a) * rr, market_c[1] + math.sin(a) * rr
-            droad, ra = dist_to_polylines(qx, qz, all_roads)
-            if droad < ROAD_HALF + 1.0 + min(spec['w'], spec['d']) / 2 * 0.35:
-                continue
-            if try_place(qx, qz, ra + (0 if rng.random() < 0.7 else 90),
-                         spec, 'center'):
-                break
+        tries = 0
+        while remaining[name] > 0 and tries < 30000:
+            tries += 1
+            if rng.random() < 0.3:
+                # strategy 1: free-standing near plaza / outer wards
+                a = rng.random() * 2 * math.pi
+                rr = R * rng.uniform(0.2, 0.8)
+                qx, qz = market_c[0] + math.cos(a) * rr, market_c[1] + math.sin(a) * rr
+                droad, ra = dist_to_polylines(qx, qz, all_roads)
+                if droad < ROAD_HALF + 1.0 + min(spec['w'], spec['d']) / 2 * 0.35:
+                    continue
+                rot = ra + (0 if rng.random() < 0.7 else 90)
+            else:
+                # strategy 2: street-front along a random road segment
+                (ax, az), (bx, bz) = segs[int(rng.random() * len(segs))]
+                sl = math.hypot(bx - ax, bz - az) or 1.0
+                ex, ez = (bx - ax) / sl, (bz - az) / sl
+                nx, nz = -ez, ex
+                t = rng.random()
+                px, pz = ax + (bx - ax) * t, az + (bz - az) * t
+                side = -1 if rng.random() < 0.5 else 1
+                off = ROAD_HALF + 1.0 + spec['d'] / 2 + rng.uniform(0, 1.0)
+                qx, qz = px + nx * side * off, pz + nz * side * off
+                rot = math.degrees(math.atan2(ez, ex)) + (90 if rng.random() < 0.5 else 0)
+            ok = try_place(qx, qz, rot, spec, 'center',
+                           near_wall_ok=(tries > 3000))
+            if not ok and rot % 90 != 0:
+                ok = try_place(qx, qz, rot + 90, spec, 'center',
+                               near_wall_ok=(tries > 3000))
+            if ok:
+                remaining[name] -= 1
 
     # castle (citadel) + market hall (plaza), placed in base space
     castle_spec = next(t for t in lib['types'] if t['name'] == 'castle')
@@ -624,7 +671,7 @@ def generate(seed, warp, R, lib):
         'citadel': {'x': cit_c[0], 'z': cit_c[1], 'r': cit_R},
         'market': {'x': market_c[0], 'z': market_c[1]},
         'river_w': river_w,
-        'mesh_spacing': R / 6.0,
+        'mesh_spacing': R / 5.0,
         'counts': {},
     }
     for p in final:
@@ -754,8 +801,8 @@ def main():
     ap = argparse.ArgumentParser(description='Block-based small town -> CSV for Houdini/PCG')
     ap.add_argument('--seed', type=int, required=True)
     ap.add_argument('--warp', type=float, default=0.35, help='0..1 mesh distortion')
-    ap.add_argument('--size', type=float, default=None, help='radius = size*6.5m')
-    ap.add_argument('--radius', type=float, default=110.0)
+    ap.add_argument('--size', type=float, default=10.0, help='small town = 10 (radius = size*6.5m)')
+    ap.add_argument('--radius', type=float, default=65.0)
     ap.add_argument('--buildings', default=os.path.join(os.path.dirname(__file__), 'buildings.json'))
     ap.add_argument('--outdir', required=True)
     ap.add_argument('--no-preview', action='store_true')
