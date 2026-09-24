@@ -353,6 +353,9 @@ def generate(seed, warp, R, lib):
     placed = []
     placed_obbs = []
     lots = []
+    # plaza: open square around the market (kept clear, drawn as paper)
+    plaza_r = market_spec_w = next(t['w'] for t in lib['types'] if t['name'] == 'market')
+    plaza_r = plaza_r / 2 + 9.0
 
     def clear_of_water_hill(qx, qz, near_wall_ok=False):
         if not point_in_poly(qx, qz, wall):
@@ -360,6 +363,8 @@ def generate(seed, warp, R, lib):
         if river_dist(qx, qz) < river_w / 2 + 1.0:
             return False
         if math.hypot(qx - cit_c[0], qz - cit_c[1]) < cit_R:
+            return False
+        if math.hypot(qx - market_c[0], qz - market_c[1]) < plaza_r:
             return False
         if not near_wall_ok:
             # keep buildings off the curtain wall
@@ -634,6 +639,21 @@ def generate(seed, warp, R, lib):
             y += spec['d'] + 1.6
         return count
 
+    # temple: one large hall facing the plaza (the preset's temple=1),
+    # mapped to the biggest common footprint so the CSV stays 7 types.
+    # Placed before the wards so it wins its plot.
+    temple_spec = next((t for t in house_types
+                        if t['name'] == 'house_D_hall'), None)
+    if temple_spec is not None:
+        for _ in range(600):
+            a = rng.random() * 2 * math.pi
+            rr = plaza_r + temple_spec['d'] / 2 + 1.5 + rng.uniform(0, 8)
+            qx = market_c[0] + math.cos(a) * rr
+            qz = market_c[1] + math.sin(a) * rr
+            face = math.degrees(math.atan2(market_c[1] - qz, market_c[0] - qx))
+            if try_place(qx, qz, face + 90, temple_spec, 'temple'):
+                break
+
     for b, blk in enumerate(blocks):
         if len(blk) < 3:
             continue
@@ -645,6 +665,21 @@ def generate(seed, warp, R, lib):
         if len(inner) < 3 or poly_area(inner) < 10:
             continue
         pack_bands(inner, r_norm, district, b)
+
+    # gates: where each radial arterial crosses the wall (drawn as thick
+    # ticks along the road, like the original's gate marks)
+    gates = []
+    for a in radial_ang:
+        ex, ez = math.cos(a), math.sin(a)
+        prev_in = True
+        for step in range(30, 130):
+            t = step / 100.0 * R
+            px, pz = market_c[0] + ex * t, market_c[1] + ez * t
+            inside = point_in_poly(px, pz, wall)
+            if prev_in and not inside:
+                gates.append(((px, pz), (ex, ez)))
+                break
+            prev_in = inside
 
     # castle (citadel) + market hall (plaza), placed in base space
     castle_spec = next(t for t in lib['types'] if t['name'] == 'castle')
@@ -700,6 +735,7 @@ def generate(seed, warp, R, lib):
         'seed': seed, 'warp': warp, 'R': R,
         'citadel': {'x': cit_c[0], 'z': cit_c[1], 'r': cit_R},
         'market': {'x': market_c[0], 'z': market_c[1]},
+        'plaza_r': plaza_r,
         'river_w': river_w,
         'mesh_spacing': R / 4.5,
         'counts': {},
@@ -708,11 +744,14 @@ def generate(seed, warp, R, lib):
         meta['counts'][p['spec']['name']] = meta['counts'].get(p['spec']['name'], 0) + 1
     meta['blocks'] = len(blocks)
     meta['lots'] = len(lots)
+    meta['gates'] = [[round(g[0][0], 3), round(g[0][1], 3),
+                      round(g[1][0], 3), round(g[1][1], 3)] for g in gates]
     base = {'wall': wall, 'roads': all_roads, 'alleys': alleys, 'river': river,
             'blocks': blocks,
             'lots': [(l['x'], l['z']) for l in lots],
             'citadel': {'x': cit_c[0], 'z': cit_c[1], 'r': cit_R},
-            'market': {'x': market_c[0], 'z': market_c[1]}, 'river_w': river_w}
+            'market': {'x': market_c[0], 'z': market_c[1], 'plaza_r': plaza_r},
+            'river_w': river_w}
     return final, wall_f, roads_f, alleys_f, river_f, river_w, blocks_f, mesh, meta, base
 
 
@@ -800,15 +839,23 @@ def write_preview(outdir, final, wall, roads, alleys, river, river_w, blocks, me
 
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">']
     parts.append(f'<rect width="100%" height="100%" fill="{PAPER}"/>')
-    # river: medium casing + paper core, like a wide road
+    # river: steel-blue band with darker edge (water on parchment)
+    WATER, WATER_D = '#a9c1cf', '#7d99a8'
     rpts = ' '.join(f'{X(x):.1f},{Z(z):.1f}' for x, z in river)
-    parts.append(f'<polyline points="{rpts}" stroke="{MEDIUM}" stroke-width="{river_w*sc:.1f}" fill="none" stroke-linecap="round"/>')
-    parts.append(f'<polyline points="{rpts}" stroke="{PAPER}" stroke-width="{max(1.0, river_w*sc-3):.1f}" fill="none" stroke-linecap="round"/>')
-    # walls: dark thick + towers
+    parts.append(f'<polyline points="{rpts}" stroke="{WATER_D}" stroke-width="{river_w*sc+2:.1f}" fill="none" stroke-linecap="round"/>')
+    parts.append(f'<polyline points="{rpts}" stroke="{WATER}" stroke-width="{river_w*sc:.1f}" fill="none" stroke-linecap="round"/>')
+    # plaza: open paper square around the market
+    mc = meta['market']
+    parts.append(f'<circle cx="{X(mc["x"]):.1f}" cy="{Z(mc["z"]):.1f}" r="{meta["plaza_r"]*sc:.1f}" fill="{PAPER}"/>')
+    # walls: dark thick + towers + gate ticks
     wpts = ' '.join(f'{X(x):.1f},{Z(z):.1f}' for x, z in wall + [wall[0]])
     parts.append(f'<polygon points="{wpts}" fill="none" stroke="{DARK}" stroke-width="5"/>')
     for x, z in wall[::4]:
         parts.append(f'<circle cx="{X(x):.1f}" cy="{Z(z):.1f}" r="3.5" fill="{DARK}"/>')
+    for (gx, gz), (ex, ez) in meta_gates(meta):
+        parts.append(f'<line x1="{X(gx-ex*4):.1f}" y1="{Z(gz-ez*4):.1f}" '
+                     f'x2="{X(gx+ex*4):.1f}" y2="{Z(gz+ez*4):.1f}" '
+                     f'stroke="{DARK}" stroke-width="7"/>')
     # roads: medium casing + paper core; ward streets between blocks drawn
     # thin (the original's ward boundaries). Band alleys stay invisible —
     # they exist only as gaps between buildings.
@@ -828,35 +875,51 @@ def write_preview(outdir, final, wall, roads, alleys, river, river_w, blocks, me
         c = obb_corners(p['x'], p['z'], p['spec']['w'], p['spec']['d'], p['rot'])
         pts = ' '.join(f'{X(x):.1f},{Z(z):.1f}' for x, z in c + [c[0]])
         parts.append(f'<polygon points="{pts}" fill="{LIGHT}" stroke="{DARK}" stroke-width="0.8"/>')
+    # compass rose (bottom-right), like the original's compass
+    cxp, cyp, r = W - 46, H - 46, 26
+    star = []
+    for k in range(8):
+        rr = r if k % 2 == 0 else r * 0.45
+        a = -math.pi / 2 + k * math.pi / 4
+        star.append(f'{cxp + rr * math.cos(a):.1f},{cyp + rr * math.sin(a):.1f}')
+    parts.append(f'<polygon points="{" ".join(star)}" fill="{MEDIUM}" stroke="{DARK}" stroke-width="1"/>')
+    parts.append(f'<text x="{cxp}" y="{cyp - r - 8}" text-anchor="middle" font-family="Georgia,serif" font-size="15" fill="{DARK}">N</text>')
     parts.append('</svg>')
     with open(os.path.join(outdir, 'preview.svg'), 'w') as f:
         f.write('\n'.join(parts))
 
 
+def meta_gates(meta):
+    for gx, gz, ex, ez in meta.get('gates', []):
+        yield (gx, gz), (ex, ez)
+
+
 def main():
-    ap = argparse.ArgumentParser(description='Block-based small town -> CSV for Houdini/PCG')
-    ap.add_argument('--seed', type=int, required=True)
+    ap = argparse.ArgumentParser(description='Watabou-style city -> CSV for Houdini/PCG')
+    ap.add_argument('--seed', type=int, default=None,
+                    help='omit for a random town (seed is echoed in manifest)')
     ap.add_argument('--warp', type=float, default=0.35, help='0..1 mesh distortion')
-    ap.add_argument('--size', type=float, default=17.0, help='small town = 17 (radius = size*6.5m), as the original link')
-    ap.add_argument('--radius', type=float, default=110.5)
+    ap.add_argument('--size', type=float, default=25.0, help='city size (radius = size*6.5m)')
+    ap.add_argument('--radius', type=float, default=162.5)
     ap.add_argument('--buildings', default=os.path.join(os.path.dirname(__file__), 'buildings.json'))
     ap.add_argument('--outdir', required=True)
     ap.add_argument('--no-preview', action='store_true')
     a = ap.parse_args()
 
+    seed = a.seed if a.seed is not None else random.randrange(2 ** 31)
     R = float(a.size) * 6.5 if a.size is not None else float(a.radius)
     warp = max(0.0, min(1.0, a.warp))
     with open(a.buildings) as f:
         lib = json.load(f)
 
     final, wall, roads, alleys, river, river_w, blocks, mesh, meta, base = \
-        generate(a.seed, warp, R, lib)
+        generate(seed, warp, R, lib)
     bp = write_all(outdir=a.outdir, final=final, wall=wall, roads=roads,
                    alleys=alleys, river=river, river_w=river_w, blocks=blocks,
-                   mesh=mesh, meta=meta, base=base, seed=a.seed, warp=warp)
+                   mesh=mesh, meta=meta, base=base, seed=seed, warp=warp)
     if not a.no_preview:
         write_preview(a.outdir, final, wall, roads, alleys, river, river_w, blocks, meta, lib)
-    print(f'seed={a.seed} warp={warp} R={R:.1f}m -> {len(final)} buildings, '
+    print(f'seed={seed} warp={warp} R={R:.1f}m -> {len(final)} buildings, '
           f'{len(blocks)} blocks, {meta["lots"]} lots')
     print(f'  counts: {meta["counts"]}')
     print(f'  wrote: {bp} (+ walls/roads/river/blocks/mesh.csv, town.json, preview.svg)')

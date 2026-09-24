@@ -2,10 +2,12 @@
 
 Stdlib-only Python. No install. 1 unit = 1 meter, Y-up.
 
-Small town, original-style: size 17 (~110 m radius, as the original link),
-citadel + walls + river, **5 common building types + market + castle** —
-every lot is filled with one of the 5 footprints (weighted, district-biased),
-~100 typed scatter points per town.
+City preset copied from the original link: size 25 (~162 m radius),
+citadel + castle, central plaza + market, temple facing the plaza, walls
+with towers + gates, river. Only two controls: **random town** (no seed —
+each click is a fresh city; the used seed is echoed for repro) and **warp**.
+5 common building types + market + castle — ~450 typed scatter points per
+city, packed in bands (92% of buildings have a neighbor within 10 m).
 
 Model (Parish & Muller 2001 road growth + CityGen blocks + Watabou wards):
 arterial/ring skeleton → **blocks/wards** (split by ward streets, drawn thin)
@@ -20,7 +22,9 @@ walls dark thick with towers, single ink style for all buildings.
 ## 0. Browser lab (original look, warp UX, small town only)
 
 https://ibackstrom.github.io/city-pipeline/ — fullscreen parchment map,
-locked **Small Town · 17** preset, only seed + warp inputs. Right-click opens
+locked **City · 25** preset, random town button + warp slider (no seed).
+Warp mode shows the mesh as **red lines** with a red brush ring, like the
+original. Right-click opens
 the menu (New town / Warp mode / Export CSV / Export JSON), like the
 original; warp mode shows the tool panel + mesh lattice and the brush ring.
 `Enter` = new town / apply warp, `Esc` = discard warp, `W` toggles warp mode.
@@ -47,12 +51,11 @@ gaps between buildings), roads are thin casings, buildings one ink style.
 ## 1. Generate (your Watabou preset)
 
 ```bash
-# small town from the original link (size 17, seed + warp)
-python3 city_gen.py --seed 1555148727 --warp 0.35 --outdir ./out_town
+# random city (size 25 preset, warp 0.35) — seed echoed in manifest.json
+python3 city_gen.py --warp 0.35 --outdir ./out_city
 
-# variations
-python3 city_gen.py --seed 42 --warp 0.0  --outdir ./out_round   # no warp = regular
-python3 city_gen.py --seed 42 --warp 0.8  --outdir ./out_organic # heavy warp
+# reproducible run (same layout every time)
+python3 city_gen.py --seed 1429458196 --warp 0.35 --outdir ./out_city
 ```
 
 `warp` = Watabou warp-tool equivalent: domain distortion of walls, roads,

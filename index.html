@@ -31,12 +31,11 @@ a{color:var(--dark)}
 </head>
 <body>
 <div id="top">
-<div class="row"><b>seed</b><input id="seed" type="number" value="1555148727">
-<button id="regen" title="Enter">new town</button></div>
+<div class="row"><button id="regen" title="Enter" style="font-size:14px;padding:5px 14px">new town</button>
+<span id="counts" style="font-size:12px;font-style:italic"></span></div>
 <div class="row"><b>warp</b><input id="warp" type="range" min="0" max="1" step="0.01" value="0.35"><span id="warpval">0.35</span></div>
-<div class="row" id="counts" style="font-size:12px;font-style:italic"></div>
 </div>
-<div id="sizes"><button class="locked">Small Town · 17</button></div>
+<div id="sizes"><button class="locked">City · 25</button></div>
 <div id="warpbar"><div id="tools"></div>
 <div style="font-size:12px;padding:2px 10px">brush <input id="brush" type="range" min="10" max="220" value="90" style="width:90px"> <span id="brushval">90</span></div>
 </div>
@@ -168,14 +167,17 @@ function genTown(seed,warp,size){
     blocks.push(...split(q,0))}}
   // ward fill: strips of like houses along each block's street frontage
   // (Watabou bands) — exact footprints, 0.9 m side gaps, 1.6 m band alleys
-  const houses=TYPES.filter(t=>t.weight>0),placed=[];
-   const clear=(x,z)=>inPoly(x,z)&&rDist(x,z)>=rw/2+1&&Math.hypot(x-cc[0],z-cc[1])>=24;
-  function tryPlace(cx,cz,rot,spec,dist){const w=spec.w,d=spec.d;
-   if(!clear(cx,cz))return false;
-   for(const[qx,qz]of corners(cx,cz,w,d,rot))if(!clear(qx,qz))return false;
-   const c=corners(cx,cz,w+GAP,d+GAP,rot);
-   for(const p of placed)if(overlap(c,corners(p.x,p.z,p.w+GAP,p.d+GAP,p.rot)))return false;
-   placed.push({x:cx,z:cz,rot,type:spec.name,w:w,d:d,h:spec.h,district:dist});return true}
+   const houses=TYPES.filter(t=>t.weight>0),placed=[];
+   const marketS=TYPES.find(t=>t.name==='market');
+   const plazaR=marketS.w/2+9;
+   const clear=(x,z)=>inPoly(x,z)&&rDist(x,z)>=rw/2+1&&
+    Math.hypot(x-cc[0],z-cc[1])>=24&&Math.hypot(x-mc[0],z-mc[1])>=plazaR;
+   function tryPlace(cx,cz,rot,spec,dist){const w=spec.w,d=spec.d;
+    if(!clear(cx,cz))return false;
+    for(const[qx,qz]of corners(cx,cz,w,d,rot))if(!clear(qx,qz))return false;
+    const c=corners(cx,cz,w+GAP,d+GAP,rot);
+    for(const p of placed)if(overlap(c,corners(p.x,p.z,p.w+GAP,p.d+GAP,p.rot)))return false;
+    placed.push({x:cx,z:cz,rot,type:spec.name,w:w,d:d,h:spec.h,district:dist});return true}
   const polyArea=p=>Math.abs(p.reduce((s,q,i)=>s+q[0]*p[(i+1)%p.length][1]-p[(i+1)%p.length][0]*q[1],0))/2;
   function shrink(poly,d){const n=poly.length,cx=poly.reduce((s,p)=>s+p[0],0)/n,cz=poly.reduce((s,p)=>s+p[1],0)/n;
    const off=poly.map((P,i)=>{const Q=poly[(i+1)%n];let ex=Q[0]-P[0],ez=Q[1]-P[1];const el=Math.hypot(ex,ez)||1;
@@ -219,19 +221,33 @@ function genTown(seed,warp,size){
       tryPlace(qx,qz,rot,spec,dist)}
      x+=spec.w+0.9}
     y+=spec.d+1.6}}
-  blocks.forEach((blk)=>{if(blk.length<3)return;
-   const cx=blk.reduce((s,p)=>s+p[0],0)/blk.length,cz=blk.reduce((s,p)=>s+p[1],0)/blk.length;
-   const rn=Math.hypot(cx-mc[0],cz-mc[1])/R,dist=rn<0.35?'center':rn<0.7?'mid':'edge';
-   const inner=shrink(blk,1.5);
-   if(inner.length<3||polyArea(inner)<10)return;
-   packBands(inner,rn,dist)});
- const castle=TYPES.find(t=>t.name==='castle'),market=TYPES.find(t=>t.name==='market');
- const am=Math.atan2(mc[1]-cc[1],mc[0]-cc[0])*180/Math.PI;
- placed.push({x:cc[0],z:cc[1],rot:((-am%360)+360)%360,type:'castle',w:castle.w,d:castle.d,h:castle.h,district:'citadel'});
- placed.push({x:mc[0],z:mc[1],rot:rng.next()*90,type:'market',w:market.w,d:market.d,h:market.h,district:'market'});
- return{seed,warp,R,riverW:rw,citadel:{x:cc[0],z:cc[1],r:24},market:{x:mc[0],z:mc[1]},
-  wall,roads,alleys,river,blocks,basePlaced:placed,mesh};
-}
+   // temple: one large hall facing the plaza, placed before the wards
+   const temple=houses.find(t=>t.name==='house_D_hall');
+   if(temple)for(let k=0;k<600;k++){
+    const a=rng.next()*2*Math.PI,rr=plazaR+temple.d/2+1.5+rng.uniform(0,8);
+    const qx=mc[0]+Math.cos(a)*rr,qz=mc[1]+Math.sin(a)*rr;
+    const face=Math.atan2(mc[1]-qz,mc[0]-qx)*180/Math.PI;
+    if(tryPlace(qx,qz,face+90,temple,'temple'))break}
+   blocks.forEach((blk)=>{if(blk.length<3)return;
+    const cx=blk.reduce((s,p)=>s+p[0],0)/blk.length,cz=blk.reduce((s,p)=>s+p[1],0)/blk.length;
+    const rn=Math.hypot(cx-mc[0],cz-mc[1])/R,dist=rn<0.35?'center':rn<0.7?'mid':'edge';
+    const inner=shrink(blk,1.5);
+    if(inner.length<3||polyArea(inner)<10)return;
+    packBands(inner,rn,dist)});
+  // gates: where radials cross the wall (thick ticks along the road)
+  const gates=[];
+  for(const a of rAng){const ex=Math.cos(a),ez=Math.sin(a);let prevIn=true;
+   for(let step=30;step<130;step++){const t=step/100*R;
+    const px=mc[0]+ex*t,pz=mc[1]+ez*t,ins=inPoly(px,pz);
+    if(prevIn&&!ins){gates.push({x:px,z:pz,ex,ez});break}
+    prevIn=ins}}
+  const castle=TYPES.find(t=>t.name==='castle');
+  const am=Math.atan2(mc[1]-cc[1],mc[0]-cc[0])*180/Math.PI;
+  placed.push({x:cc[0],z:cc[1],rot:((-am%360)+360)%360,type:'castle',w:castle.w,d:castle.d,h:castle.h,district:'citadel'});
+  placed.push({x:mc[0],z:mc[1],rot:rng.next()*90,type:'market',w:marketS.w,d:marketS.d,h:marketS.h,district:'market'});
+  return{seed,warp,R,riverW:rw,citadel:{x:cc[0],z:cc[1],r:24},market:{x:mc[0],z:mc[1]},plazaR,gates,
+   wall,roads,alleys,river,blocks,basePlaced:placed,mesh};
+ }
 
 // ---- evaluated view (base -> final through mesh) + render ----
 let T=null,snap0=null;
@@ -260,6 +276,7 @@ function fit(V){const all=[...V.wall,...V.river,...V.buildings.map(b=>[b.x,b.z])
  const x0=Math.min(...xs)-10,x1=Math.max(...xs)+10,z0=Math.min(...zs)-10,z1=Math.max(...zs)+10;
  view.s=Math.min(cv.width/(x1-x0),cv.height/(z1-z0));view.ox=x0;view.oz=z0}
 const X=x=>(x-view.ox)*view.s,Z=z=>(z-view.oz)*view.s;
+const M0=o=>T.mesh.ev(o.x,o.z); // base-space point -> final space
 const countsEl=document.getElementById('counts'),hint=document.getElementById('hint'),
  brushEl=document.getElementById('brush'),brushval=document.getElementById('brushval');
 // original DEFAULT palette
@@ -270,17 +287,24 @@ function strokePoly(pts,close){ctx.beginPath();
 function draw(V,brushPt){
  // paper
  ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle=PAPER;ctx.fillRect(0,0,cv.width,cv.height);
- // river: medium casing + paper core (old build has no waterbodies pass)
- ctx.lineCap='round';ctx.strokeStyle=MEDIUM;ctx.lineWidth=Math.max(3,T.riverW*view.s);
+ // river: steel-blue band with darker edge (water on parchment)
+ const WATER='#a9c1cf',WATER_D='#7d99a8';
+ ctx.lineCap='round';
+ ctx.strokeStyle=WATER_D;ctx.lineWidth=Math.max(4,T.riverW*view.s+2);
  ctx.beginPath();V.river.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
- ctx.strokeStyle=PAPER;ctx.lineWidth=Math.max(1,T.riverW*view.s-3);
+ ctx.strokeStyle=WATER;ctx.lineWidth=Math.max(2,T.riverW*view.s);
  ctx.beginPath();V.river.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
- // city wall: dark thick + towers
+ // plaza: open paper square around the market
+ const mc0=M0(T.market);ctx.fillStyle=PAPER;
+ ctx.beginPath();ctx.arc(X(mc0[0]),Z(mc0[1]),T.plazaR*view.s,0,7);ctx.fill();
+ // city wall: dark thick + towers + gate ticks
  ctx.strokeStyle=DARK;ctx.lineWidth=5;strokePoly([...V.wall,V.wall[0]]);
  ctx.fillStyle=DARK;
  V.wall.filter((_,i)=>i%4===0).forEach(p=>{ctx.beginPath();ctx.arc(X(p[0]),Z(p[1]),3.5,0,7);ctx.fill()});
+ ctx.strokeStyle=DARK;ctx.lineWidth=7;
+ for(const g of T.gates){const q=M0(g);ctx.beginPath();
+  ctx.moveTo(X(q[0]-g.ex*4),Z(q[1]-g.ez*4));ctx.lineTo(X(q[0]+g.ex*4),Z(q[1]+g.ez*4));ctx.stroke()}
  // roads: medium casing + paper core (original MAIN_STREET look).
- // alleys NOT drawn — in the original they exist only as building gaps.
  for(const L of V.roads){ctx.strokeStyle=MEDIUM;ctx.lineWidth=4.0;
   ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
   ctx.strokeStyle=PAPER;ctx.lineWidth=2.6;
@@ -299,16 +323,24 @@ function draw(V,brushPt){
   [[1,1],[1,-1],[-1,-1],[-1,1],[1,1]].forEach(([sx,sz],i)=>{const lx=sx*hw,lz=sz*hd;
    const px=X(b.x+lx*c-lz*s),pz=Z(b.z+lx*s+lz*c);i?ctx.lineTo(px,pz):ctx.moveTo(px,pz)});
   ctx.fillStyle=LIGHT;ctx.fill();ctx.strokeStyle=DARK;ctx.lineWidth=0.8;ctx.stroke()}
- // warp mesh lives only in warp mode (like the original)
- if(mode==='warp'){ctx.strokeStyle='rgba(26,25,23,.4)';ctx.lineWidth=1;
+ // warp mesh lives only in warp mode — RED lines, like the original
+ if(mode==='warp'){ctx.strokeStyle='rgba(196,49,75,.75)';ctx.lineWidth=1.2;
   const M=T.mesh;
   for(let j=0;j<M.nz;j++){ctx.beginPath();for(let i=0;i<M.nx;i++){const k=j*M.nx+i;
    const q=M.ev(M.base[k][0],M.base[k][1]);i?ctx.lineTo(X(q[0]),Z(q[1])):ctx.moveTo(X(q[0]),Z(q[1]))}ctx.stroke()}
   for(let i=0;i<M.nx;i++){ctx.beginPath();for(let j=0;j<M.nz;j++){const k=j*M.nx+i;
    const q=M.ev(M.base[k][0],M.base[k][1]);j?ctx.lineTo(X(q[0]),Z(q[1])):ctx.moveTo(X(q[0]),Z(q[1]))}ctx.stroke()}}
  if(mode==='warp'&&brushPt){ctx.beginPath();ctx.arc(X(brushPt[0]),Z(brushPt[1]),+brushEl.value*view.s,0,7);
-  ctx.strokeStyle=DARK;ctx.setLineDash([6,4]);ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([])}
- countsEl.textContent=V.buildings.length+' buildings · seed '+T.seed;
+  ctx.strokeStyle='#c4314b';ctx.setLineDash([6,4]);ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([])}
+ // compass rose (bottom-right)
+ const cxp=cv.width-46,cyp=cv.height-46,r=26;
+ ctx.beginPath();
+ for(let k=0;k<8;k++){const rr=k%2===0?r:r*0.45,a=-Math.PI/2+k*Math.PI/4;
+  const px=cxp+rr*Math.cos(a),pz=cyp+rr*Math.sin(a);k?ctx.lineTo(px,pz):ctx.moveTo(px,pz)}
+ ctx.closePath();ctx.fillStyle=MEDIUM;ctx.fill();ctx.strokeStyle=DARK;ctx.lineWidth=1;ctx.stroke();
+ ctx.fillStyle=DARK;ctx.font='15px Georgia,serif';ctx.textAlign='center';
+ ctx.fillText('N',cxp,cyp-r-8);ctx.textAlign='left';
+ countsEl.textContent=V.buildings.length+' buildings · town #'+T.seed;
  return V;
 }
 
@@ -385,12 +417,14 @@ document.addEventListener('keydown',e=>{
  if(mode==='warp'&&e.key==='-')brushEl.value=Math.max(10,+brushEl.value-10);
  brushval.textContent=brushEl.value;if(mode==='warp'&&V)draw(V,hov)});
 
-// ---- controls: small town only (size 17 locked), seed + warp ----
-const seedEl=document.getElementById('seed'),warpEl=document.getElementById('warp');
+// ---- controls: random town (no seed input), size 25 city, warp slider ----
+const warpEl=document.getElementById('warp');
 warpEl.oninput=()=>warpval.textContent=(+warpEl.value).toFixed(2);
 brushEl.oninput=()=>{brushval.textContent=brushEl.value;if(mode==='warp'&&V)draw(V,hov)};
-function regen(){T=genTown(String(seedEl.value).trim(),+warpEl.value,17);
- snap0=T.mesh.snapshot();V=current();fit(V);V._drawn=false;draw(V);V._drawn=true;
+function regen(){
+ const seed=String((Math.random()*2**31)|0); // pure random town each click
+ T=genTown(seed,+warpEl.value,25);
+ snap0=T.mesh.snapshot();V=current();fit(V);draw(V);
  T.basePlaced.forEach(b=>b._r0=b.rot);setMode('map')}
 function resetWarp(){if(snap0){T.mesh.restore(snap0);
  T.basePlaced.forEach(b=>{if(b._r0!==undefined)b.rot=b._r0});
