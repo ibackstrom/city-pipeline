@@ -191,7 +191,31 @@ SETBACK = 1.0
 ALLEY_HALF = 1.5
 
 
-def generate(seed, warp, R, lib):
+def catmull_rom(pts, sub=6):
+    """Smooth a control polyline like the original's curved streets."""
+    if len(pts) < 3:
+        return list(pts)
+    out = [pts[0]]
+    n = len(pts)
+    for i in range(n - 1):
+        p0 = pts[i - 1] if i > 0 else pts[i]
+        p1 = pts[i]
+        p2 = pts[i + 1]
+        p3 = pts[i + 2] if i + 2 < n else pts[i + 1]
+        for s in range(1, sub + 1):
+            t = s / sub
+            t2, t3 = t * t, t * t * t
+            x = 0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t +
+                       (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
+                       (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3)
+            z = 0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t +
+                       (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
+                       (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
+            out.append((x, z))
+    return out
+
+
+def generate(seed, warp, R, lib, count=55):
     rng = random.Random(seed)
     phases = {
         'f1': 0.018 + rng.random() * 0.012,
@@ -214,7 +238,7 @@ def generate(seed, warp, R, lib):
     rdx, rdz = math.cos(river_ang), math.sin(river_ang)
     rnx, rnz = -rdz, rdx
     meander_ph = rng.random() * 6.28
-    meander_amp = 12.0 + warp * 22.0
+    meander_amp = (0.10 + 0.22 * warp) * R
     river = []
     for t in range(-14, 15):
         s = t * R / 12.0
@@ -224,11 +248,16 @@ def generate(seed, warp, R, lib):
     def river_dist(x, z):
         return dist_to_polylines(x, z, [river])[0]
 
-    cit_ang = rng.random() * 2 * math.pi
-    cit_c = (math.cos(cit_ang) * R * 0.32, math.sin(cit_ang) * R * 0.32)
-    if river_dist(*cit_c) < river_w / 2 + 26:
-        cit_c = (-cit_c[0], -cit_c[1])
-    cit_R = 24.0
+    # preset citadel=0: castle ward against the wall instead of a hill fort
+    castle_spec = next(t for t in lib['types'] if t['name'] == 'castle')
+    cast_ang = rng.random() * 2 * math.pi
+    cast_c = (math.cos(cast_ang) * (R - castle_spec['d'] / 2 - 7.0),
+              math.sin(cast_ang) * (R - castle_spec['d'] / 2 - 7.0))
+    if river_dist(*cast_c) < river_w / 2 + castle_spec['d'] / 2 + 4:
+        cast_c = (-cast_c[0], -cast_c[1])
+    cast_R = max(castle_spec['w'], castle_spec['d']) / 2 + 3.0
+    cit_c = cast_c          # exclusion center (shared checks below)
+    cit_R = cast_R
 
     market_c = (0.0, 0.0)
     if river_dist(0, 0) < river_w / 2 + 14:
@@ -242,9 +271,9 @@ def generate(seed, warp, R, lib):
                 continue
             break
 
-    # -- road skeleton: radial arterials + ring streets (Parish-style:
-    #   arterials first, rings snap at crossings = radial vertices)
-    n_radial = 9
+    # -- road skeleton: a few radial arterials + two ring streets,
+    #   drawn as smooth curves (catmull-rom) like the original's streets
+    n_radial = 7
     base_ang = rng.random() * 2 * math.pi
     radial_ang = [base_ang + 2 * math.pi * i / n_radial + rng.uniform(-0.12, 0.12)
                   for i in range(n_radial)]
@@ -253,15 +282,15 @@ def generate(seed, warp, R, lib):
         ex, ez = math.cos(a) * R * 1.02, math.sin(a) * R * 1.02
         bx = market_c[0] + (ex - market_c[0]) * frac
         bz = market_c[1] + (ez - market_c[1]) * frac
-        wig = math.sin(frac * 5.0 + a * 3.0) * (2.5 + warp * 4.0) * math.sin(frac * math.pi)
+        wig = math.sin(frac * 5.0 + a * 3.0) * (1.5 + warp * 3.0) * math.sin(frac * math.pi)
         return (bx - math.sin(a) * wig * wiggle, bz + math.cos(a) * wig * wiggle)
 
-    radials = []
+    radials_ctrl = []
     for a in radial_ang:
-        radials.append([radial_pt(a, s / 7, 1.0) for s in range(8)])
+        radials_ctrl.append([radial_pt(a, s / 7, 1.0) for s in range(8)])
 
-    ring_fracs = [0.18, 0.45, 0.75]
-    rings = []
+    ring_fracs = [0.42, 0.8]
+    rings_ctrl = []
     for frac in ring_fracs:
         pts = []
         for i in range(N_WALL):
@@ -269,8 +298,12 @@ def generate(seed, warp, R, lib):
             pts.append((market_c[0] + math.cos(a) * R * frac,
                         market_c[1] + math.sin(a) * R * frac))
         pts.append(pts[0])
-        rings.append(pts)
+        rings_ctrl.append(pts)
+
+    radials = [catmull_rom(r, 6) for r in radials_ctrl]
+    rings = [catmull_rom(r, 2) for r in rings_ctrl]
     all_roads = radials + rings
+    all_roads_ctrl = radials_ctrl + rings_ctrl
 
     # -- warp mesh over the base layout
     xs = [p[0] for p in wall] + [r[0] for r in river]
@@ -604,16 +637,17 @@ def generate(seed, warp, R, lib):
             pool = [t for t in pool if t['w'] * t['d'] >= 48] or pool
         return pool
 
-    def pack_bands(blk_inner, r_norm, district, b):
+    def pack_bands(blk_inner, r_norm, district, b, budget):
         """Watabou ward fill: strips perpendicular to the street. Each band
         is a row of like houses along the street frontage, exact footprints,
-        0.9 m side gaps, 1.6 m alley between bands. Zero slivers by design."""
+        0.9 m side gaps, 1.6 m alley between bands. Stops at the remaining
+        building budget (quantity control)."""
         lw, lh, ang, P0, (ex, ez), (nx, nz) = lot_frame(blk_inner)
         pool = district_pool(r_norm)
         rot = ang  # footprint w along the street, d inward
-        count = 0
+        placed_n = 0
         y = 0.8
-        while True:
+        while placed_n < budget:
             room_y = lh - 0.8 - y
             cands = [t for t in pool if t['d'] <= room_y - 0.3]
             if not cands:
@@ -621,7 +655,7 @@ def generate(seed, warp, R, lib):
             # band type: weighted; occasionally swap mid-band for variety
             spec = rng.choices(cands, weights=[t['weight'] for t in cands], k=1)[0]
             x = 0.8 + rng.uniform(0, 1.2)
-            while x + spec['w'] <= lw - 0.8:
+            while x + spec['w'] <= lw - 0.8 and placed_n < budget:
                 if rng.random() < 0.18:  # occasional in-row swap
                     alt = [t for t in cands
                            if t['w'] <= lw - 0.8 - x + spec['w'] - 0.3
@@ -634,16 +668,17 @@ def generate(seed, warp, R, lib):
                     if try_place(qx, qz, rot, spec, district):
                         lots.append({'x': qx, 'z': qz, 'rot': rot,
                                      'frontage': spec['w'], 'block': b})
-                        count += 1
+                        placed_n += 1
                 x += spec['w'] + 0.9
             y += spec['d'] + 1.6
-        return count
+        return placed_n
 
     # temple: one large hall facing the plaza (the preset's temple=1),
     # mapped to the biggest common footprint so the CSV stays 7 types.
-    # Placed before the wards so it wins its plot.
+    # Placed before the wards so it wins its plot; counts toward the total.
     temple_spec = next((t for t in house_types
                         if t['name'] == 'house_D_hall'), None)
+    temple_done = False
     if temple_spec is not None:
         for _ in range(600):
             a = rng.random() * 2 * math.pi
@@ -652,9 +687,21 @@ def generate(seed, warp, R, lib):
             qz = market_c[1] + math.sin(a) * rr
             face = math.degrees(math.atan2(market_c[1] - qz, market_c[0] - qx))
             if try_place(qx, qz, face + 90, temple_spec, 'temple'):
+                temple_done = True
                 break
 
-    for b, blk in enumerate(blocks):
+    # quantity control: houses = target - reserved landmarks
+    budget = max(0, count - 2 - (1 if temple_done else 0))
+    # fill wards from the center outward until the budget is spent
+    block_order = sorted(
+        range(len(blocks)),
+        key=lambda b: math.hypot(
+            sum(p[0] for p in blocks[b]) / len(blocks[b]) - market_c[0],
+            sum(p[1] for p in blocks[b]) / len(blocks[b]) - market_c[1]))
+    for b in block_order:
+        if budget <= 0:
+            break
+        blk = blocks[b]
         if len(blk) < 3:
             continue
         cx = sum(p[0] for p in blk) / len(blk)
@@ -664,7 +711,7 @@ def generate(seed, warp, R, lib):
         inner = shrink_poly(blk, 1.5)  # inset from street centerlines (getCityBlock)
         if len(inner) < 3 or poly_area(inner) < 10:
             continue
-        pack_bands(inner, r_norm, district, b)
+        budget -= pack_bands(inner, r_norm, district, b, budget)
 
     # gates: where each radial arterial crosses the wall (drawn as thick
     # ticks along the road, like the original's gate marks)
@@ -681,11 +728,11 @@ def generate(seed, warp, R, lib):
                 break
             prev_in = inside
 
-    # castle (citadel) + market hall (plaza), placed in base space
-    castle_spec = next(t for t in lib['types'] if t['name'] == 'castle')
-    ang_to_market = math.degrees(math.atan2(market_c[1] - cit_c[1], market_c[0] - cit_c[0]))
-    placed.append({'x': cit_c[0], 'z': cit_c[1], 'rot': -ang_to_market,
-                   'spec': castle_spec, 'district': 'citadel'})
+    # castle: wall-side keep (preset citadel=0), facing the town center
+    ang_to_center = math.degrees(math.atan2(market_c[1] - cast_c[1],
+                                            market_c[0] - cast_c[0]))
+    placed.append({'x': cast_c[0], 'z': cast_c[1], 'rot': -ang_to_center,
+                   'spec': castle_spec, 'district': 'castle'})
     market_spec = next(t for t in lib['types'] if t['name'] == 'market')
     placed.append({'x': market_c[0], 'z': market_c[1], 'rot': rng.uniform(0, 90),
                    'spec': market_spec, 'district': 'market'})
@@ -861,20 +908,24 @@ def write_preview(outdir, final, wall, roads, alleys, river, river_w, blocks, me
     # they exist only as gaps between buildings.
     for line in roads:
         pts = ' '.join(f'{X(x):.1f},{Z(z):.1f}' for x, z in line)
-        parts.append(f'<polyline points="{pts}" stroke="{MEDIUM}" stroke-width="4.0" fill="none"/>')
-        parts.append(f'<polyline points="{pts}" stroke="{PAPER}" stroke-width="2.6" fill="none"/>')
+        parts.append(f'<polyline points="{pts}" stroke="{MEDIUM}" stroke-width="3.2" fill="none" stroke-linecap="round"/>')
+        parts.append(f'<polyline points="{pts}" stroke="{PAPER}" stroke-width="1.8" fill="none" stroke-linecap="round"/>')
     for line in alleys:
         pts = ' '.join(f'{X(x):.1f},{Z(z):.1f}' for x, z in line)
-        parts.append(f'<polyline points="{pts}" stroke="{MEDIUM}" stroke-width="2.4" fill="none"/>')
-        parts.append(f'<polyline points="{pts}" stroke="{PAPER}" stroke-width="1.2" fill="none"/>')
-    cc = meta['citadel']
-    cpts = ' '.join(f'{X(cc["x"]+math.cos(a)*cc["r"]):.1f},{Z(cc["z"]+math.sin(a)*cc["r"]):.1f}'
-                    for a in [i * 6.283 / 24 for i in range(24)])
-    parts.append(f'<polygon points="{cpts}" fill="none" stroke="{DARK}" stroke-width="4"/>')
+        parts.append(f'<polyline points="{pts}" stroke="{MEDIUM}" stroke-width="2.0" fill="none"/>')
+        parts.append(f'<polyline points="{pts}" stroke="{PAPER}" stroke-width="0.9" fill="none"/>')
     for p in final:
         c = obb_corners(p['x'], p['z'], p['spec']['w'], p['spec']['d'], p['rot'])
         pts = ' '.join(f'{X(x):.1f},{Z(z):.1f}' for x, z in c + [c[0]])
-        parts.append(f'<polygon points="{pts}" fill="{LIGHT}" stroke="{DARK}" stroke-width="0.8"/>')
+        if p['spec']['name'] == 'castle':
+            # castle keep: own curtain wall (offset rect) + heavy stroke
+            wc = obb_corners(p['x'], p['z'], p['spec']['w'] + 6,
+                             p['spec']['d'] + 6, p['rot'])
+            wpts2 = ' '.join(f'{X(x):.1f},{Z(z):.1f}' for x, z in wc + [wc[0]])
+            parts.append(f'<polygon points="{wpts2}" fill="none" stroke="{DARK}" stroke-width="3.5"/>')
+            parts.append(f'<polygon points="{pts}" fill="{LIGHT}" stroke="{DARK}" stroke-width="2.2"/>')
+        else:
+            parts.append(f'<polygon points="{pts}" fill="{LIGHT}" stroke="{DARK}" stroke-width="0.8"/>')
     # compass rose (bottom-right), like the original's compass
     cxp, cyp, r = W - 46, H - 46, 26
     star = []
@@ -899,21 +950,37 @@ def main():
     ap.add_argument('--seed', type=int, default=None,
                     help='omit for a random town (seed is echoed in manifest)')
     ap.add_argument('--warp', type=float, default=0.35, help='0..1 mesh distortion')
-    ap.add_argument('--size', type=float, default=25.0, help='city size (radius = size*6.5m)')
-    ap.add_argument('--radius', type=float, default=162.5)
+    ap.add_argument('--count', type=int, default=55,
+                    help='target number of buildings (town radius derives from it)')
+    ap.add_argument('--size', type=float, default=None,
+                    help='override radius = size*6.5m (default: derived from --count)')
+    ap.add_argument('--radius', type=float, default=None)
     ap.add_argument('--buildings', default=os.path.join(os.path.dirname(__file__), 'buildings.json'))
     ap.add_argument('--outdir', required=True)
     ap.add_argument('--no-preview', action='store_true')
     a = ap.parse_args()
 
     seed = a.seed if a.seed is not None else random.randrange(2 ** 31)
-    R = float(a.size) * 6.5 if a.size is not None else float(a.radius)
+    if a.size is not None:
+        R = float(a.size) * 6.5
+    elif a.radius is not None:
+        R = float(a.radius)
+    else:
+        # radius from the building budget at measured band density
+        R = max(50.0, min(220.0, 25.0 + 7.0 * math.sqrt(a.count)))
     warp = max(0.0, min(1.0, a.warp))
     with open(a.buildings) as f:
         lib = json.load(f)
 
     final, wall, roads, alleys, river, river_w, blocks, mesh, meta, base = \
-        generate(seed, warp, R, lib)
+        None, None, None, None, None, None, None, None, None, None
+    for _ in range(4):
+        # grow the radius until the wards can supply the target count
+        final, wall, roads, alleys, river, river_w, blocks, mesh, meta, base = \
+            generate(seed, warp, R, lib, count=a.count)
+        if len(final) >= a.count * 0.92 or R >= 220.0:
+            break
+        R = min(220.0, R * 1.15)
     bp = write_all(outdir=a.outdir, final=final, wall=wall, roads=roads,
                    alleys=alleys, river=river, river_w=river_w, blocks=blocks,
                    mesh=mesh, meta=meta, base=base, seed=seed, warp=warp)

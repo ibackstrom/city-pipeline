@@ -2,36 +2,41 @@
 
 Stdlib-only Python. No install. 1 unit = 1 meter, Y-up.
 
-City preset copied from the original link: size 25 (~162 m radius),
-citadel + castle, central plaza + market, temple facing the plaza, walls
-with towers + gates, river. Only two controls: **random town** (no seed —
-each click is a fresh city; the used seed is echoed for repro) and **warp**.
-5 common building types + market + castle — ~450 typed scatter points per
-city, packed in bands (92% of buildings have a neighbor within 10 m).
+Preset copied from the original link (citadel=0, plaza=1, temple=1, walls=1,
+river=1): walled town, central plaza + market, temple facing the plaza,
+castle keep against the wall, gates where streets cross the wall, river.
+Controls: **random town** (no seed — fresh city each click, seed echoed for
+repro), **building count** (20-120, default ~55) and **warp**. 5 common
+building types + market + castle — the town radius auto-fits the requested
+count, and wards fill center-out until the budget is spent, so counts land
+on target (verified 40/55/60/90 → 40/54/58/87).
 
 Model (Parish & Muller 2001 road growth + CityGen blocks + Watabou wards):
-arterial/ring skeleton → **blocks/wards** (split by ward streets, drawn thin)
-→ each block inset from its streets (`getCityBlock`) and filled with
-**bands of like houses** along the street frontage — exact footprints walked
-edge-to-edge, 0.9 m side gaps, 1.6 m band alleys, occasional vacant lots.
-87% of buildings have a neighbor within 10 m: packed chunks, not scatter.
-Rendered in the original DEFAULT palette (paper `#ccc5b8`, light `#99948a`,
-medium `#67635c`, dark `#1a1917`): roads as medium casing + paper core,
-walls dark thick with towers, single ink style for all buildings.
+arterial/ring skeleton (7 radials + 2 rings, **smooth catmull-rom curves**)
+→ **blocks/wards** (split by ward streets, drawn thin) → each block inset
+from its streets (`getCityBlock`) and filled with **bands of like houses**
+along the street frontage — exact footprints walked edge-to-edge, 0.9 m side
+gaps, 1.6 m band alleys, occasional vacant lots. Rendered in the original
+DEFAULT palette (paper `#ccc5b8`, light `#99948a`, medium `#67635c`, dark
+`#1a1917`): roads as medium casing + paper core, steel-blue river, walls
+dark thick with towers + gate ticks, castle keep with its own curtain wall,
+plaza as an open square, compass rose, single ink style for all buildings.
 
-## 0. Browser lab (original look, warp UX, small town only)
+## 0. Browser lab
 
-https://ibackstrom.github.io/city-pipeline/ — fullscreen parchment map,
-locked **City · 25** preset, random town button + warp slider (no seed).
+https://ibackstrom.github.io/city-pipeline/ — fullscreen parchment map.
+Top bar: **new town** (random), **buildings** slider, **warp** slider.
+**Hover any building** to see its type, footprint and district in a tooltip.
 Warp mode shows the mesh as **red lines** with a red brush ring, like the
-original. Right-click opens
-the menu (New town / Warp mode / Export CSV / Export JSON), like the
-original; warp mode shows the tool panel + mesh lattice and the brush ring.
-`Enter` = new town / apply warp, `Esc` = discard warp, `W` toggles warp mode.
+original; **Displace grabs the mesh nodes under the brush and they follow
+the cursor absolutely** (falloff frozen at grab time) — the same feel as the
+original's warp. Right-click opens the menu (New town / Warp mode / Export
+CSV / Export JSON). `Enter` = new town / apply warp, `Esc` = discard warp,
+`W` toggles warp mode.
 
 | Tool | Key | Does |
 |------|-----|------|
-| Displace | D | pull mesh nodes (default warp brush) |
+| Displace | D | grab mesh nodes, they follow the cursor (default) |
 | Liquify | L | softer smear |
 | Rotate | R | twist the mesh around the brush |
 | Bloat | B | inflate / push cells outward |
@@ -43,19 +48,23 @@ Wheel or `+`/`-` = brush size.
 `Export CSV` downloads `buildings.csv` with the same columns as the Python
 output (warped state included) — straight into Houdini/PCG.
 
-Limited geometry by design: small-town radius only (~110 m), coarse warp
-lattice (~R/6 spacing), ~100 buildings, plain canvas fills — no heavy layers.
-Rendering matches the original: alleys are never drawn (they exist only as
-gaps between buildings), roads are thin casings, buildings one ink style.
+Limited geometry by design: ~50-90 buildings by default, coarse warp lattice
+(~R/4.5 spacing), plain canvas fills — no heavy layers. Rendering matches
+the original: band alleys are never drawn (they exist only as gaps between
+buildings), streets are thin curved casings, buildings one ink style.
 
 ## 1. Generate (your Watabou preset)
 
 ```bash
-# random city (size 25 preset, warp 0.35) — seed echoed in manifest.json
-python3 city_gen.py --warp 0.35 --outdir ./out_city
+# random town (~55 buildings) — seed echoed in manifest.json
+python3 city_gen.py --warp 0.35 --outdir ./out_town
+
+# quantity control: town radius auto-fits the target
+python3 city_gen.py --count 40 --warp 0.35 --outdir ./out_40
+python3 city_gen.py --count 90 --warp 0.35 --outdir ./out_90
 
 # reproducible run (same layout every time)
-python3 city_gen.py --seed 1429458196 --warp 0.35 --outdir ./out_city
+python3 city_gen.py --seed 1431062708 --warp 0.35 --outdir ./out_town
 ```
 
 `warp` = Watabou warp-tool equivalent: domain distortion of walls, roads,
