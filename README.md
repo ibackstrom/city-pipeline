@@ -8,14 +8,14 @@ every lot is filled with one of the 5 footprints (weighted, district-biased),
 ~100 typed scatter points per town.
 
 Model (Parish & Muller 2001 road growth + CityGen blocks + Watabou wards):
-arterial/ring skeleton → **blocks** (quads split by alleys) → **lots** via the
-original `Ward.createAlleys` recursion (inset block, longest-edge bisect at a
-spread ratio, 0.6 m alley gap, min-size + empty-lot rules) → one footprint
-inscribed per lot until each type reaches its instance count; any shortfall
-falls back to street-front / free-standing placement. Rendered in the
-original DEFAULT palette (paper `#ccc5b8`, light `#99948a`, medium
-`#67635c`, dark `#1a1917`): roads drawn as medium casing + paper core, walls
-dark thick with towers, single ink style for all buildings.
+arterial/ring skeleton → **blocks/wards** (split by ward streets, drawn thin)
+→ each block inset from its streets (`getCityBlock`) and filled with
+**bands of like houses** along the street frontage — exact footprints walked
+edge-to-edge, 0.9 m side gaps, 1.6 m band alleys, occasional vacant lots.
+87% of buildings have a neighbor within 10 m: packed chunks, not scatter.
+Rendered in the original DEFAULT palette (paper `#ccc5b8`, light `#99948a`,
+medium `#67635c`, dark `#1a1917`): roads as medium casing + paper core,
+walls dark thick with towers, single ink style for all buildings.
 
 ## 0. Browser lab (original look, warp UX, small town only)
 
@@ -68,12 +68,12 @@ Output in `outdir/`:
 - `preview.svg` — blocks, lots implied, buildings, roads
 - `manifest.json` — seed/warp echo + counts
 
-Placement is block-based: each block is inset from its streets and cut into
-lots by the original alley recursion; one exact footprint is inscribed per
-lot (0.8 m gaps, OBB overlap rejection, road-aligned rotation). A post-warp
-overlap cull drops the smaller building of any pair the mesh distortion
-intersects (market/castle are never dropped), so the exported CSV is always
-collision-free for scattering.
+Placement is band-based: each block is inset from its streets and packed
+with rows of like houses (weighted type per band, district-biased: big
+buildings central, cottages at the edge), exact footprints, OBB overlap
+rejection. A post-warp overlap cull drops the smaller building of any pair
+the mesh distortion intersects (market/castle are never dropped), so the
+exported CSV is always collision-free for scattering.
 
 ## 2. Fit your actual house sizes
 

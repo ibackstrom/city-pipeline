@@ -70,7 +70,7 @@ const overlap=(A,B)=>{for(const P of[A,B])for(let i=0;i<4;i++){
 // ---- warp mesh: shared lattice, all geometry evaluated through it ----
 function WarpMesh(x0,x1,z0,z1,spacing,rng,warp,R,PH){
  const nx=Math.max(2,Math.ceil((x1-x0)/spacing)+1),nz=Math.max(2,Math.ceil((z1-z0)/spacing)+1);
- const base=[],off=[],amp=warp*R*0.35;
+ const base=[],off=[],amp=warp*R*0.20;
  for(let j=0;j<nz;j++)for(let i=0;i<nx;i++){
   const bx=x0+i*spacing+((i>0&&i<nx-1)?rng.uniform(-0.3,0.3)*spacing:0);
   const bz=z0+j*spacing+((j>0&&j<nz-1)?rng.uniform(-0.3,0.3)*spacing:0);
@@ -128,7 +128,7 @@ function genTown(seed,warp,size){
  let mc=[0,0];
  if(rDist(0,0)<rw/2+14)outer:for(let k=1;k<8;k++)for(const s of[1,-1]){
   const c=[rnx*s*k*8,rnz*s*k*8];if(rDist(c[0],c[1])>rw/2+14){mc=c;break outer}}
- const nR=7,b0=rng.next()*2*Math.PI,rAng=[];
+ const nR=9,b0=rng.next()*2*Math.PI,rAng=[];
  for(let i=0;i<nR;i++)rAng.push(b0+2*Math.PI*i/nR+(rng.next()-0.5)*0.24);
  const rPt=(a,fr)=>{const ex=Math.cos(a)*R*1.02,ez=Math.sin(a)*R*1.02;
   const bx=mc[0]+(ex-mc[0])*fr,bz=mc[1]+(ez-mc[1])*fr;
@@ -140,7 +140,7 @@ function genTown(seed,warp,size){
  const roads=[...radials,...rings];
  const xs=[...wall.map(p=>p[0]),...river.map(p=>p[0])],zs=[...wall.map(p=>p[1]),...river.map(p=>p[1])];
  const mesh=WarpMesh(Math.min(...xs)-15,Math.max(...xs)+15,Math.min(...zs)-15,Math.max(...zs)+15,
-  R/6,rng,warp,R,PH);
+  R/4.5,rng,warp,R,PH);
  // blocks: quads between consecutive radials x rings
  const wallAt=a=>wall.reduce((m,p)=>{const d=Math.abs((Math.atan2(p[1],p[0])-a+Math.PI*3)%(Math.PI*2)-Math.PI);
   return d<m.d?{d,p}:m},{d:1e9}).p;
@@ -160,95 +160,71 @@ function genTown(seed,warp,size){
    else{const cx=ch.reduce((s,p)=>s+p[0],0)/ch.length,cz=ch.reduce((s,p)=>s+p[1],0)/ch.length;
     for(let n=0;n<ch.length;n++)out.push([ch[n],ch[(n+1)%ch.length],[cx,cz]])}}
   return out}
- const blocks=[];
- for(let i=0;i<nR;i++){const i2=(i+1)%nR;
-  for(let j=0;j<rp.length-1;j++){const q=[rp[j][i],rp[j][i2],rp[j+1][i2],rp[j+1][i]];
-   const cx=(q[0][0]+q[1][0]+q[2][0]+q[3][0])/4,cz=(q[0][1]+q[1][1]+q[2][1]+q[3][1])/4;
-   if(rDist(cx,cz)<rw/2+4||Math.hypot(cx-cc[0],cz-cc[1])<26)continue;
-   blocks.push(...split(q,0))}}
- // lots: original Ward.createAlleys — inset block, recursive longest-edge
- // bisect (alley gap 0.6), inscribe one footprint per leaf lot
- const houses=TYPES.filter(t=>t.weight>0),placed=[];
-  const clear=(x,z)=>inPoly(x,z)&&rDist(x,z)>=rw/2+1&&Math.hypot(x-cc[0],z-cc[1])>=24;
- function tryPlace(cx,cz,rot,spec,dist){const w=spec.w,d=spec.d;
-  if(!clear(cx,cz))return false;
-  for(const[qx,qz]of corners(cx,cz,w,d,rot))if(!clear(qx,qz))return false;
-  const c=corners(cx,cz,w+GAP,d+GAP,rot);
-  for(const p of placed)if(overlap(c,corners(p.x,p.z,p.w+GAP,p.d+GAP,p.rot)))return false;
-  placed.push({x:cx,z:cz,rot,type:spec.name,w:w,d:d,h:spec.h,district:dist});return true}
- const polyArea=p=>Math.abs(p.reduce((s,q,i)=>s+q[0]*p[(i+1)%p.length][1]-p[(i+1)%p.length][0]*q[1],0))/2;
- function shrink(poly,d){const n=poly.length,cx=poly.reduce((s,p)=>s+p[0],0)/n,cz=poly.reduce((s,p)=>s+p[1],0)/n;
-  const off=poly.map((P,i)=>{const Q=poly[(i+1)%n];let ex=Q[0]-P[0],ez=Q[1]-P[1];const el=Math.hypot(ex,ez)||1;
-   let nx=-ez/el,nz=ex/el;const mx=(P[0]+Q[0])/2,my=(P[1]+Q[1])/2;
-   if((cx-mx)*nx+(cz-my)*nz<0){nx=-nx;nz=-nz}return{P,Q,nx,nz}});
-  return off.map((o,i)=>{const p2=off[(i+1)%n];
-   const e1x=o.Q[0]-o.P[0],e1z=o.Q[1]-o.P[1],e2x=p2.Q[0]-p2.P[0],e2z=p2.Q[1]-p2.P[1];
-   const a1x=o.P[0]+o.nx*d,a1z=o.P[1]+o.nz*d,a2x=p2.P[0]+p2.nx*d,a2z=p2.P[1]+p2.nz*d;
-   const den=e1x*e2z-e1z*e2x;
-   if(Math.abs(den)<1e-9)return[a1x+e1x*0.5,a1z+e1z*0.5];
-   const t=((a2x-a1x)*e2z-(a2z-a1z)*e2x)/den;return[a1x+e1x*t,a1z+e1z*t]})}
- function splitPoly(poly,t,jang,gap){const n=poly.length;
-  let best=0,bl=-1;for(let i=0;i<n;i++){const l=Math.hypot(poly[(i+1)%n][0]-poly[i][0],poly[(i+1)%n][1]-poly[i][1]);
-   if(l>bl){bl=l;best=i}}
-  const P0=poly[best],P1=poly[(best+1)%n];
-  const A=[P0[0]+(P1[0]-P0[0])*t,P0[1]+(P1[1]-P0[1])*t];
-  let ccx=poly.reduce((s,p)=>s+p[0],0)/n-A[0],ccz=poly.reduce((s,p)=>s+p[1],0)/n-A[1];
-  const cl=Math.hypot(ccx,ccz)||1,ca=Math.cos(jang),sa=Math.sin(jang);
-  let dx=(ccx/cl)*ca-(ccz/cl)*sa,dz=(ccx/cl)*sa+(ccz/cl)*ca;
-  const scored=[];
-  for(let i=0;i<n;i++){if(i===best)continue;const Q0=poly[i],Q1=poly[(i+1)%n];
-   scored.push([((Q0[0]+Q1[0])/2-A[0])*dx+((Q0[1]+Q1[1])/2-A[1])*dz,i])}
-  scored.sort((a,b)=>b[0]-a[0]);let B=null,e1=-1;
-  for(const[,i]of scored){const Q0=poly[i],Q1=poly[(i+1)%n];
-   const ex2=Q1[0]-Q0[0],ez2=Q1[1]-Q0[1],den=dx*ez2-dz*ex2;
-   if(Math.abs(den)<1e-12)continue;
-   const v=((Q0[0]-A[0])*dz-(Q0[1]-A[1])*dx)/den;
-   if(v>=0.02&&v<=0.98){B=[Q0[0]+ex2*v,Q0[1]+ez2*v];e1=i;break}}
-  if(!B)return null;
-  const ch1=[A];{let k=best;while(true){ch1.push(poly[(k+1)%n]);if(k===e1)break;k=(k+1)%n}ch1.push(B)}
-  const ch2=[B];{let k=e1;while(true){ch2.push(poly[(k+1)%n]);if(k===best)break;k=(k+1)%n}ch2.push(A)}
-  const g=gap/2,c1=[A[0]+dx*g,A[1]+dz*g],c2=[A[0]-dx*g,A[1]-dz*g];
-  const d1=[B[0]+dx*g,B[1]+dz*g],d2=[B[0]-dx*g,B[1]-dz*g];
-  const r1=[c1,...ch1.slice(1,-1),d1],r2=[d2,...ch2.slice(1,-1),c2];
-  if(Math.min(polyArea(r1),polyArea(r2))<polyArea(poly)*0.15)return null;
-  alleys.push([A,B]);return[r1,r2]}
- function createAlleys(poly){const spread=0.8*0.7;
-  for(let a=0;a<5;a++){const ratio=(1-spread)/2+rng.next()*spread;
-   const asp=Math.PI/6*0.7*(polyArea(poly)<42*4?0:1),b=(rng.next()-0.5)*asp;
-   const res=splitPoly(poly,ratio,b,0.6);
-   if(res){const out=[];
-    for(const half of res){
-     if(half.length<3||polyArea(half)<42*Math.pow(2,4*0.5*(rng.next()-0.5))){
-      if(rng.next()>=0.04)out.push(half)}else out.push(...createAlleys(half))}
-    return out}}
-  return[poly]}
- function lotFrame(lot){const n=lot.length;
-  let best=0,bl=-1;for(let i=0;i<n;i++){const l=Math.hypot(lot[(i+1)%n][0]-lot[i][0],lot[(i+1)%n][1]-lot[i][1]);
-   if(l>bl){bl=l;best=i}}
-  const P0=lot[best],P1=lot[(best+1)%n],ang=Math.atan2(P1[1]-P0[1],P1[0]-P0[0])*180/Math.PI;
-  const r=ang*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
-  const xs=lot.map(p=>p[0]*c+p[1]*s),zs=lot.map(p=>-p[0]*s+p[1]*c);
-  const x0=Math.min(...xs),x1=Math.max(...xs),z0=Math.min(...zs),z1=Math.max(...zs);
-  return{w:x1-x0,h:z1-z0,ang,cx:(x0+x1)/2,cz:(z0+z1)/2,c,s}}
-  // dense fill: every lot gets one of the 5 house types (weighted, only
-  // types that fit); market + castle placed once. No floating buildings.
+  const blocks=[];
+  for(let i=0;i<nR;i++){const i2=(i+1)%nR;
+   for(let j=0;j<rp.length-1;j++){const q=[rp[j][i],rp[j][i2],rp[j+1][i2],rp[j+1][i]];
+    const cx=(q[0][0]+q[1][0]+q[2][0]+q[3][0])/4,cz=(q[0][1]+q[1][1]+q[2][1]+q[3][1])/4;
+    if(rDist(cx,cz)<rw/2+8||Math.hypot(cx-cc[0],cz-cc[1])<30)continue;
+    blocks.push(...split(q,0))}}
+  // ward fill: strips of like houses along each block's street frontage
+  // (Watabou bands) — exact footprints, 0.9 m side gaps, 1.6 m band alleys
+  const houses=TYPES.filter(t=>t.weight>0),placed=[];
+   const clear=(x,z)=>inPoly(x,z)&&rDist(x,z)>=rw/2+1&&Math.hypot(x-cc[0],z-cc[1])>=24;
+  function tryPlace(cx,cz,rot,spec,dist){const w=spec.w,d=spec.d;
+   if(!clear(cx,cz))return false;
+   for(const[qx,qz]of corners(cx,cz,w,d,rot))if(!clear(qx,qz))return false;
+   const c=corners(cx,cz,w+GAP,d+GAP,rot);
+   for(const p of placed)if(overlap(c,corners(p.x,p.z,p.w+GAP,p.d+GAP,p.rot)))return false;
+   placed.push({x:cx,z:cz,rot,type:spec.name,w:w,d:d,h:spec.h,district:dist});return true}
+  const polyArea=p=>Math.abs(p.reduce((s,q,i)=>s+q[0]*p[(i+1)%p.length][1]-p[(i+1)%p.length][0]*q[1],0))/2;
+  function shrink(poly,d){const n=poly.length,cx=poly.reduce((s,p)=>s+p[0],0)/n,cz=poly.reduce((s,p)=>s+p[1],0)/n;
+   const off=poly.map((P,i)=>{const Q=poly[(i+1)%n];let ex=Q[0]-P[0],ez=Q[1]-P[1];const el=Math.hypot(ex,ez)||1;
+    let nx=-ez/el,nz=ex/el;const mx=(P[0]+Q[0])/2,my=(P[1]+Q[1])/2;
+    if((cx-mx)*nx+(cz-my)*nz<0){nx=-nx;nz=-nz}return{P,Q,nx,nz}});
+   return off.map((o,i)=>{const p2=off[(i+1)%n];
+    const e1x=o.Q[0]-o.P[0],e1z=o.Q[1]-o.P[1],e2x=p2.Q[0]-p2.P[0],e2z=p2.Q[1]-p2.P[1];
+    const a1x=o.P[0]+o.nx*d,a1z=o.P[1]+o.nz*d,a2x=p2.P[0]+p2.nx*d,a2z=p2.P[1]+p2.nz*d;
+    const den=e1x*e2z-e1z*e2x;
+    if(Math.abs(den)<1e-9)return[a1x+e1x*0.5,a1z+e1z*0.5];
+    const t=((a2x-a1x)*e2z-(a2z-a1z)*e2x)/den;return[a1x+e1x*t,a1z+e1z*t]})}
+  function lotFrame(lot){const n=lot.length;
+   let best=0,bl=-1;for(let i=0;i<n;i++){const l=Math.hypot(lot[(i+1)%n][0]-lot[i][0],lot[(i+1)%n][1]-lot[i][1]);
+    if(l>bl){bl=l;best=i}}
+   const P0=lot[best],P1=lot[(best+1)%n],ang=Math.atan2(P1[1]-P0[1],P1[0]-P0[0])*180/Math.PI;
+   const r=ang*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
+   const xs=lot.map(p=>p[0]*c+p[1]*s),zs=lot.map(p=>-p[0]*s+p[1]*c);
+   const lw=Math.max(...xs)-Math.min(...xs),lh=Math.max(...zs)-Math.min(...zs);
+   let ex=(P1[0]-P0[0])/bl,ez=(P1[1]-P0[1])/bl,nx=-ez,nz=ex;
+   const ccx=lot.reduce((a,p)=>a+p[0],0)/n,ccz=lot.reduce((a,p)=>a+p[1],0)/n;
+   if((ccx-P0[0])*nx+(ccz-P0[1])*nz<0){nx=-nx;nz=-nz}
+   return{lw,lh,ang,P0,ex,ez,nx,nz}}
+  const districtPool=rn=>{let pool=houses;
+   if(rn>0.7)pool=pool.filter(t=>t.w*t.d<=100);
+   if(rn<0.35)pool=pool.filter(t=>t.w*t.d>=48);
+   return pool.length?pool:houses};
+  function packBands(inner,rn,dist){
+   const F=lotFrame(inner),pool=districtPool(rn),rot=F.ang;
+   let y=0.8;
+   for(;;){const roomY=F.lh-0.8-y;
+    const cands=pool.filter(t=>t.d<=roomY-0.3);
+    if(!cands.length)break;
+    let spec=rng.pickW(cands,cands.map(t=>t.weight));
+    let x=0.8+rng.uniform(0,1.2);
+    while(x+spec.w<=F.lw-0.8){
+     if(rng.next()<0.18){const alt=cands.filter(t=>t.w<=F.lw-0.8-x+spec.w-0.3);
+      if(alt.length)spec=rng.pickW(alt,alt.map(t=>t.weight))}
+     if(rng.next()>=0.03){
+      const qx=F.P0[0]+F.ex*(x+spec.w/2)+F.nx*(y+spec.d/2);
+      const qz=F.P0[1]+F.ez*(x+spec.w/2)+F.nz*(y+spec.d/2);
+      tryPlace(qx,qz,rot,spec,dist)}
+     x+=spec.w+0.9}
+    y+=spec.d+1.6}}
   blocks.forEach((blk)=>{if(blk.length<3)return;
    const cx=blk.reduce((s,p)=>s+p[0],0)/blk.length,cz=blk.reduce((s,p)=>s+p[1],0)/blk.length;
    const rn=Math.hypot(cx-mc[0],cz-mc[1])/R,dist=rn<0.35?'center':rn<0.7?'mid':'edge';
-   const inner=shrink(blk,0.8);
+   const inner=shrink(blk,1.5);
    if(inner.length<3||polyArea(inner)<10)return;
-   for(const lot of createAlleys(inner)){if(lot.length<3)continue;
-    const F=lotFrame(lot),qx=F.cx*F.c-F.cz*F.s,qz=F.cx*F.s+F.cz*F.c;
-    let cands=houses.filter(t=>t.w<=F.w-0.4&&t.d<=F.h-0.4),rotated=false;
-    if(!cands.length){cands=houses.filter(t=>t.d<=F.w-0.4&&t.w<=F.h-0.4);rotated=true}
-    if(rn>0.7)cands=cands.filter(t=>t.w*t.d<=100);
-    if(rn<0.35)cands=cands.filter(t=>t.w*t.d>=48);
-    if(!cands.length)continue;
-    const cw=cands.map(t=>t.weight),seen=new Set(),order=[];
-    for(let k=0;k<3;k++){const sp=rng.pickW(cands,cw);if(!seen.has(sp.name)){seen.add(sp.name);order.push(sp)}}
-    order.push(...[...cands].sort((a,b)=>a.w*a.d-b.w*b.d));
-    for(const spec of order)
-     if(tryPlace(qx,qz,F.ang+(rotated?90:0),spec,dist))break}});
+   packBands(inner,rn,dist)});
  const castle=TYPES.find(t=>t.name==='castle'),market=TYPES.find(t=>t.name==='market');
  const am=Math.atan2(mc[1]-cc[1],mc[0]-cc[0])*180/Math.PI;
  placed.push({x:cc[0],z:cc[1],rot:((-am%360)+360)%360,type:'castle',w:castle.w,d:castle.d,h:castle.h,district:'citadel'});
@@ -308,6 +284,11 @@ function draw(V,brushPt){
  for(const L of V.roads){ctx.strokeStyle=MEDIUM;ctx.lineWidth=4.0;
   ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
   ctx.strokeStyle=PAPER;ctx.lineWidth=2.6;
+  ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke()}
+ // ward streets between blocks: thin casings
+ for(const L of V.alleys){ctx.strokeStyle=MEDIUM;ctx.lineWidth=2.4;
+  ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke();
+  ctx.strokeStyle=PAPER;ctx.lineWidth=1.2;
   ctx.beginPath();L.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Z(p[1])):ctx.moveTo(X(p[0]),Z(p[1])));ctx.stroke()}
  // citadel wall
  ctx.strokeStyle=DARK;ctx.lineWidth=4;

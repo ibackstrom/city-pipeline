@@ -102,7 +102,7 @@ class WarpMesh:
         self.x0, self.z0 = x0, z0
         self.base = []  # [bx, bz]
         self.off = []   # [ox, oz] (seeded warp + brush edits)
-        amp = warp * R * 0.35
+        amp = warp * R * 0.20
         f1, f2 = phases['f1'], phases['f2']
         for j in range(self.nz):
             for i in range(self.nx):
@@ -244,7 +244,7 @@ def generate(seed, warp, R, lib):
 
     # -- road skeleton: radial arterials + ring streets (Parish-style:
     #   arterials first, rings snap at crossings = radial vertices)
-    n_radial = 7
+    n_radial = 9
     base_ang = rng.random() * 2 * math.pi
     radial_ang = [base_ang + 2 * math.pi * i / n_radial + rng.uniform(-0.12, 0.12)
                   for i in range(n_radial)]
@@ -276,7 +276,7 @@ def generate(seed, warp, R, lib):
     xs = [p[0] for p in wall] + [r[0] for r in river]
     zs = [p[1] for p in wall] + [r[1] for r in river]
     mesh = WarpMesh(min(xs) - 12, max(xs) + 12, min(zs) - 12, max(zs) + 12,
-                    R / 6.0, rng, warp, R, phases)
+                    R / 4.5, rng, warp, R, phases)
 
     # -- blocks: quads between consecutive radials x rings (CityGen faces).
     #   ring boundary 3 = wall: nearest wall vertex per radial angle.
@@ -338,9 +338,9 @@ def generate(seed, warp, R, lib):
             # skip blocks drowned by the river / citadel
             cx = sum(p[0] for p in q) / 4
             cz = sum(p[1] for p in q) / 4
-            if river_dist(cx, cz) < river_w / 2 + 4:
+            if river_dist(cx, cz) < river_w / 2 + 8:
                 continue
-            if math.hypot(cx - cit_c[0], cz - cit_c[1]) < cit_R + 2:
+            if math.hypot(cx - cit_c[0], cz - cit_c[1]) < cit_R + 6:
                 continue
             blocks += split_quad(q)
 
@@ -393,10 +393,9 @@ def generate(seed, warp, R, lib):
     # -- lots via the original Ward.createAlleys: inset the block from the
     #   streets, then recursively bisect the longest edge (alley gap 0.6).
     #   Leaf polygons are lots; one library footprint is inscribed per lot.
+    #   Lot target ~ house scale -> packed chunks like the original.
     GRID_CHAOS = 0.7
-    SIZE_CHAOS = 0.5
-    EMPTY_PROB = 0.04
-    MIN_SQ = 42.0  # ~ smallest house footprint
+    EMPTY_PROB = 0.03
 
     def poly_area(poly):
         return abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1]
@@ -506,29 +505,68 @@ def generate(seed, warp, R, lib):
         alleys.append([A, B])
         return c1, c2
 
-    def create_alleys(poly):
+    def lot_bbox(lot):
+        """Axis frame of the lot -> (w, h) in its longest-edge orientation."""
+        n = len(lot)
+        best, blen = 0, -1.0
+        for i in range(n):
+            l = math.hypot(lot[(i + 1) % n][0] - lot[i][0],
+                           lot[(i + 1) % n][1] - lot[i][1])
+            if l > blen:
+                blen, best = l, i
+        P0, P1 = lot[best], lot[(best + 1) % n]
+        ang = math.atan2(P1[1] - P0[1], P1[0] - P0[0])
+        c, s = math.cos(ang), math.sin(ang)
+        xs = [p[0] * c + p[1] * s for p in lot]
+        zs = [-p[0] * s + p[1] * c for p in lot]
+        return max(xs) - min(xs), max(zs) - min(zs)
+
+    def lot_fits(lot):
+        """True if any library footprint fits inside the lot bbox."""
+        bw, bh = lot_bbox(lot)
+        for t in house_types:
+            if (t['w'] <= bw - 0.4 and t['d'] <= bh - 0.4) or \
+               (t['d'] <= bw - 0.4 and t['w'] <= bh - 0.4):
+                return True
+        return False
+
+    MAX_LOT = 260.0   # recovery ceiling for unsplittable lots
+    LOT_TARGET = 72.0  # snug single-building lots (original ward scale)
+
+    def create_alleys(poly, depth=0):
+        """Split down to house scale; every leaf can hold one of OUR
+        footprints. Slivers become alley gaps; unsplittable parents that
+        still fit something are kept whole (large ward buildings)."""
+        a = poly_area(poly)
+        if depth > 8 or a < 30.0:
+            return []  # alley sliver
+        fits = lot_fits(poly)
+        if fits and a <= LOT_TARGET:
+            if rng.random() >= EMPTY_PROB:
+                return [poly]
+            return []  # 3% vacant lot -> courtyard
         spread = 0.8 * GRID_CHAOS
         res = None
         for _ in range(5):  # retry grazed cuts with a fresh ratio/angle
             ratio = (1 - spread) / 2 + rng.random() * spread
-            angle_spread = math.pi / 6 * GRID_CHAOS * (0.0 if poly_area(poly) < MIN_SQ * 4 else 1.0)
+            # angle jitter only on big lots: small cuts stay perpendicular
+            # so lots stay rectangular and pack tight
+            angle_spread = math.pi / 6 * GRID_CHAOS * (1.0 if a > 400.0 else 0.0)
             b = (rng.random() - 0.5) * angle_spread
             res = split_poly(poly, ratio, b, 0.6)
             if res is not None:
                 break
         if res is None:
-            return [poly]
+            return [poly] if (fits and a <= MAX_LOT) else []
         out = []
         for half in res:
-            if len(half) < 3 or poly_area(half) < MIN_SQ * (2 ** (4 * SIZE_CHAOS * (rng.random() - 0.5))):
-                if rng.random() >= EMPTY_PROB:
-                    out.append(half)
-            else:
-                out += create_alleys(half)
+            out += create_alleys(half, depth + 1)
+        if not out and fits and a <= MAX_LOT:
+            return [poly]  # children were all slivers: keep the parent
         return out
 
     def lot_frame(lot):
-        """Longest-edge frame -> (w, h, angle)."""
+        """Longest-edge frame -> (w, h, angle, P0, dir, inward normal)."""
         n = len(lot)
         best, blen = 0, -1.0
         for i in range(n):
@@ -542,7 +580,59 @@ def generate(seed, warp, R, lib):
         c, s = math.cos(r), math.sin(r)
         xs = [p[0] * c + p[1] * s for p in lot]
         zs = [-p[0] * s + p[1] * c for p in lot]
-        return max(xs) - min(xs), max(zs) - min(zs), ang, (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2, c, s
+        lw = max(xs) - min(xs)
+        lh = max(zs) - min(zs)
+        ex, ez = (P1[0] - P0[0]) / blen, (P1[1] - P0[1]) / blen
+        nx, nz = -ez, ex
+        # inward normal: toward lot centroid
+        ccx = sum(p[0] for p in lot) / n
+        ccz = sum(p[1] for p in lot) / n
+        if (ccx - P0[0]) * nx + (ccz - P0[1]) * nz < 0:
+            nx, nz = -nx, -nz
+        return lw, lh, ang, P0, (ex, ez), (nx, nz)
+
+    def district_pool(r_norm):
+        pool = list(house_types)
+        if r_norm > 0.7:
+            pool = [t for t in pool if t['w'] * t['d'] <= 100] or pool
+        if r_norm < 0.35:
+            pool = [t for t in pool if t['w'] * t['d'] >= 48] or pool
+        return pool
+
+    def pack_bands(blk_inner, r_norm, district, b):
+        """Watabou ward fill: strips perpendicular to the street. Each band
+        is a row of like houses along the street frontage, exact footprints,
+        0.9 m side gaps, 1.6 m alley between bands. Zero slivers by design."""
+        lw, lh, ang, P0, (ex, ez), (nx, nz) = lot_frame(blk_inner)
+        pool = district_pool(r_norm)
+        rot = ang  # footprint w along the street, d inward
+        count = 0
+        y = 0.8
+        while True:
+            room_y = lh - 0.8 - y
+            cands = [t for t in pool if t['d'] <= room_y - 0.3]
+            if not cands:
+                break
+            # band type: weighted; occasionally swap mid-band for variety
+            spec = rng.choices(cands, weights=[t['weight'] for t in cands], k=1)[0]
+            x = 0.8 + rng.uniform(0, 1.2)
+            while x + spec['w'] <= lw - 0.8:
+                if rng.random() < 0.18:  # occasional in-row swap
+                    alt = [t for t in cands
+                           if t['w'] <= lw - 0.8 - x + spec['w'] - 0.3
+                           and t['d'] <= room_y - 0.3]
+                    if alt:
+                        spec = rng.choices(alt, weights=[t['weight'] for t in alt], k=1)[0]
+                if rng.random() >= EMPTY_PROB:  # few vacant lots
+                    qx = P0[0] + ex * (x + spec['w'] / 2) + nx * (y + spec['d'] / 2)
+                    qz = P0[1] + ez * (x + spec['w'] / 2) + nz * (y + spec['d'] / 2)
+                    if try_place(qx, qz, rot, spec, district):
+                        lots.append({'x': qx, 'z': qz, 'rot': rot,
+                                     'frontage': spec['w'], 'block': b})
+                        count += 1
+                x += spec['w'] + 0.9
+            y += spec['d'] + 1.6
+        return count
 
     for b, blk in enumerate(blocks):
         if len(blk) < 3:
@@ -551,42 +641,10 @@ def generate(seed, warp, R, lib):
         cz = sum(p[1] for p in blk) / len(blk)
         r_norm = math.hypot(cx - market_c[0], cz - market_c[1]) / R
         district = 'center' if r_norm < 0.35 else ('mid' if r_norm < 0.7 else 'edge')
-        inner = shrink_poly(blk, 0.8)  # city block inset from streets
+        inner = shrink_poly(blk, 1.5)  # inset from street centerlines (getCityBlock)
         if len(inner) < 3 or poly_area(inner) < 10:
             continue
-        for lot in create_alleys(inner):
-            if len(lot) < 3:
-                continue
-            lw, lh, ang, fx, fz, c, s = lot_frame(lot)
-            # back to world coords of lot center
-            qx = fx * c - fz * s
-            qz = fx * s + fz * c
-            cands = [t for t in house_types if t['w'] <= lw - 0.4 and t['d'] <= lh - 0.4]
-            rotated = False
-            if not cands:
-                # try the footprint turned 90 degrees
-                cands = [t for t in house_types if t['d'] <= lw - 0.4 and t['w'] <= lh - 0.4]
-                rotated = True
-            if r_norm > 0.7:
-                cands = [t for t in cands if t['w'] * t['d'] <= 100] or cands
-            if r_norm < 0.35:
-                cands = [t for t in cands if t['w'] * t['d'] >= 48] or cands
-            if not cands:
-                continue
-            cw = [t['weight'] for t in cands]
-            tried, order = set(), []
-            for _ in range(3):
-                spec = rng.choices(cands, weights=cw, k=1)[0]
-                if spec['name'] not in tried:
-                    tried.add(spec['name'])
-                    order.append(spec)
-            order += sorted(cands, key=lambda t: t['w'] * t['d'])
-            rot = ang + (90 if rotated else 0)
-            for spec in order:
-                if try_place(qx, qz, rot, spec, district):
-                    lots.append({'x': qx, 'z': qz, 'rot': rot,
-                                 'frontage': round(lw, 2), 'block': b})
-                    break
+        pack_bands(inner, r_norm, district, b)
 
     # castle (citadel) + market hall (plaza), placed in base space
     castle_spec = next(t for t in lib['types'] if t['name'] == 'castle')
@@ -643,7 +701,7 @@ def generate(seed, warp, R, lib):
         'citadel': {'x': cit_c[0], 'z': cit_c[1], 'r': cit_R},
         'market': {'x': market_c[0], 'z': market_c[1]},
         'river_w': river_w,
-        'mesh_spacing': R / 6.0,
+        'mesh_spacing': R / 4.5,
         'counts': {},
     }
     for p in final:
@@ -751,12 +809,17 @@ def write_preview(outdir, final, wall, roads, alleys, river, river_w, blocks, me
     parts.append(f'<polygon points="{wpts}" fill="none" stroke="{DARK}" stroke-width="5"/>')
     for x, z in wall[::4]:
         parts.append(f'<circle cx="{X(x):.1f}" cy="{Z(z):.1f}" r="3.5" fill="{DARK}"/>')
-    # roads: medium casing + paper core. Alleys are NOT drawn — in the
-    # original they exist only as gaps between buildings.
+    # roads: medium casing + paper core; ward streets between blocks drawn
+    # thin (the original's ward boundaries). Band alleys stay invisible —
+    # they exist only as gaps between buildings.
     for line in roads:
         pts = ' '.join(f'{X(x):.1f},{Z(z):.1f}' for x, z in line)
         parts.append(f'<polyline points="{pts}" stroke="{MEDIUM}" stroke-width="4.0" fill="none"/>')
         parts.append(f'<polyline points="{pts}" stroke="{PAPER}" stroke-width="2.6" fill="none"/>')
+    for line in alleys:
+        pts = ' '.join(f'{X(x):.1f},{Z(z):.1f}' for x, z in line)
+        parts.append(f'<polyline points="{pts}" stroke="{MEDIUM}" stroke-width="2.4" fill="none"/>')
+        parts.append(f'<polyline points="{pts}" stroke="{PAPER}" stroke-width="1.2" fill="none"/>')
     cc = meta['citadel']
     cpts = ' '.join(f'{X(cc["x"]+math.cos(a)*cc["r"]):.1f},{Z(cc["z"]+math.sin(a)*cc["r"]):.1f}'
                     for a in [i * 6.283 / 24 for i in range(24)])
